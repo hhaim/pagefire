@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,14 +28,6 @@ func (h *UserHandler) Routes() chi.Router {
 	r.Get("/{id}", h.get)
 	r.Put("/{id}", h.update)
 	r.Delete("/{id}", h.delete)
-
-	r.Get("/{id}/contact-methods", h.listContactMethods)
-	r.Post("/{id}/contact-methods", h.createContactMethod)
-	r.Delete("/{id}/contact-methods/{cmID}", h.deleteContactMethod)
-
-	r.Get("/{id}/notification-rules", h.listNotificationRules)
-	r.Post("/{id}/notification-rules", h.createNotificationRule)
-	r.Delete("/{id}/notification-rules/{ruleID}", h.deleteNotificationRule)
 
 	return r
 }
@@ -216,109 +207,6 @@ func (h *UserHandler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.users.Delete(r.Context(), targetID); err != nil {
-		handleStoreError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *UserHandler) listContactMethods(w http.ResponseWriter, r *http.Request) {
-	methods, err := h.users.ListContactMethods(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
-		handleStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, methods)
-}
-
-func (h *UserHandler) createContactMethod(w http.ResponseWriter, r *http.Request) {
-	var cm store.ContactMethod
-	if err := decodeJSON(w, r, &cm); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	cm.UserID = chi.URLParam(r, "id")
-	if cm.Type == "" || cm.Value == "" {
-		writeError(w, http.StatusBadRequest, "type and value are required")
-		return
-	}
-	// Validate contact method value by type
-	switch cm.Type {
-	case "email":
-		if !validateEmail(cm.Value) {
-			writeError(w, http.StatusBadRequest, "invalid email address")
-			return
-		}
-	case "webhook":
-		// Basic URL format validation only. SSRF protection is enforced
-		// at send time by the webhook provider, not at registration time.
-		u, err := url.Parse(cm.Value)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-			writeError(w, http.StatusBadRequest, "invalid webhook URL")
-			return
-		}
-	case "sms", "phone":
-		if !validateE164(cm.Value) {
-			writeError(w, http.StatusBadRequest, "invalid phone number, use E.164 format (e.g. +12025551234)")
-			return
-		}
-	case "slack_dm":
-		if cm.Value == "" {
-			writeError(w, http.StatusBadRequest, "slack user ID required")
-			return
-		}
-	default:
-		writeError(w, http.StatusBadRequest, "unsupported contact method type")
-		return
-	}
-	if err := h.users.CreateContactMethod(r.Context(), &cm); err != nil {
-		handleStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, cm)
-}
-
-func (h *UserHandler) deleteContactMethod(w http.ResponseWriter, r *http.Request) {
-	if err := h.users.DeleteContactMethod(r.Context(), chi.URLParam(r, "cmID")); err != nil {
-		handleStoreError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *UserHandler) listNotificationRules(w http.ResponseWriter, r *http.Request) {
-	rules, err := h.users.ListNotificationRules(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
-		handleStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, rules)
-}
-
-func (h *UserHandler) createNotificationRule(w http.ResponseWriter, r *http.Request) {
-	var nr store.NotificationRule
-	if err := decodeJSON(w, r, &nr); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	nr.UserID = chi.URLParam(r, "id")
-	if nr.ContactMethodID == "" {
-		writeError(w, http.StatusBadRequest, "contact_method_id is required")
-		return
-	}
-	if nr.DelayMinutes < 0 {
-		writeError(w, http.StatusBadRequest, "delay_minutes must be non-negative")
-		return
-	}
-	if err := h.users.CreateNotificationRule(r.Context(), &nr); err != nil {
-		handleStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, nr)
-}
-
-func (h *UserHandler) deleteNotificationRule(w http.ResponseWriter, r *http.Request) {
-	if err := h.users.DeleteNotificationRule(r.Context(), chi.URLParam(r, "ruleID")); err != nil {
 		handleStoreError(w, err)
 		return
 	}

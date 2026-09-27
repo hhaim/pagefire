@@ -14,7 +14,7 @@ type responseTransport func(*http.Request) (*http.Response, error)
 
 func (f responseTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
-func TestUnifiedAlertFeedAndPushoverAck(t *testing.T) {
+func TestHomeEventFeedAndPushoverAck(t *testing.T) {
 	ctx := context.Background()
 	svc, db, _ := newTestService(t)
 	var sent []url.Values
@@ -44,12 +44,15 @@ func TestUnifiedAlertFeedAndPushoverAck(t *testing.T) {
 		t.Fatalf("start: %+v, %v", start, err)
 	}
 	var status, details string
-	if err := db.QueryRowContext(ctx, `SELECT status,details FROM alerts WHERE id=?`, start.AlertID).Scan(&status, &details); err != nil || status != "triggered" || details != "Boiler room sensor" {
-		t.Fatalf("canonical alert: status=%q details=%q err=%v", status, details, err)
+	if err := db.QueryRowContext(ctx, `SELECT status,details FROM home_alerts WHERE id=?`, start.AlertID).Scan(&status, &details); err != nil || status != "active" || details != "Boiler room sensor" {
+		t.Fatalf("home alert: status=%q details=%q err=%v", status, details, err)
 	}
-	info, err := svc.Process(ctx, "owner", EventRequest{EventID: "info-1", Event: "info", Severity: "high", Summary: "Sensor note", Details: "Reading 99"})
+	info, err := svc.Process(ctx, "owner", EventRequest{EventID: "info-1", IncidentKey: "water", Event: "info", Severity: "high", Summary: "Sensor note", Details: "Reading 99"})
 	if err != nil || info.Status != "applied" {
 		t.Fatalf("info: %+v, %v", info, err)
+	}
+	if _, err := svc.Process(ctx, "owner", EventRequest{EventID: "info-no-key", Event: "info", Severity: "high", Summary: "Missing key"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("info without incident key: %v", err)
 	}
 	if err := svc.dispatchDue(ctx); err != nil {
 		t.Fatal(err)
@@ -65,8 +68,9 @@ func TestUnifiedAlertFeedAndPushoverAck(t *testing.T) {
 	if err := svc.processPushoverReceipts(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM alerts WHERE id=?`, start.AlertID).Scan(&status); err != nil || status != "acknowledged" {
-		t.Fatalf("Pushover ACK did not update canonical alert: %q, %v", status, err)
+	var acknowledgedAt any
+	if err := db.QueryRowContext(ctx, `SELECT acknowledged_at FROM home_alerts WHERE id=?`, start.AlertID).Scan(&acknowledgedAt); err != nil || acknowledgedAt == nil {
+		t.Fatalf("Pushover ACK did not update home alert: %v, %v", acknowledgedAt, err)
 	}
 	var nextRepeat any
 	if err := db.QueryRowContext(ctx, `SELECT next_repeat_at FROM home_alerts WHERE id=?`, start.AlertID).Scan(&nextRepeat); err != nil || nextRepeat != nil {
@@ -83,25 +87,20 @@ func TestUnifiedAlertFeedAndPushoverAck(t *testing.T) {
 	if err != nil || feed.Total != 1 || feed.Events[0].AlertID != start.AlertID {
 		t.Fatalf("start in unified feed: %+v, %v", feed.Events, err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO escalation_policies(id,name) VALUES('service-policy','Service policy')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO services(id,name,escalation_policy_id) VALUES('service-1','Service 1','service-policy')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO alerts(id,service_id,status,summary,details,source) VALUES('service-alert-1','service-1','triggered','CPU high','Host A','api')`); err != nil {
-		t.Fatal(err)
-	}
 	feed, err = svc.Feed(ctx, "owner", FeedFilter{Window: "1h"})
-	if err != nil || feed.TypeCounts["start"] != 1 || feed.TypeCounts["info"] != 1 || feed.TypeCounts["alert"] != 1 || feed.OpenAlerts != 2 {
-		t.Fatalf("combined feed counts: total=%d types=%+v open=%d err=%v", feed.Total, feed.TypeCounts, feed.OpenAlerts, err)
+	if err != nil || feed.TypeCounts["start"] != 1 || feed.TypeCounts["info"] != 1 || feed.OpenAlerts != 1 || feed.Events[0].Client != "water" {
+		t.Fatalf("home feed counts: total=%d types=%+v open=%d err=%v", feed.Total, feed.TypeCounts, feed.OpenAlerts, err)
+	}
+	infoFeed, err := svc.Feed(ctx, "owner", FeedFilter{Window: "1h", Type: "info", Client: "water"})
+	if err != nil || infoFeed.Total != 1 || infoFeed.Events[0].Client != "water" {
+		t.Fatalf("info incident key filter: %+v, %v", infoFeed.Events, err)
 	}
 	stop, err := svc.Process(ctx, "owner", EventRequest{EventID: "stop-1", IncidentKey: "water", Event: "stop"})
 	if err != nil || stop.Status != "applied" {
 		t.Fatalf("stop: %+v, %v", stop, err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM alerts WHERE id=?`, start.AlertID).Scan(&status); err != nil || status != "resolved" {
-		t.Fatalf("stop did not resolve canonical alert: %q, %v", status, err)
+	if err := db.QueryRowContext(ctx, `SELECT status FROM home_alerts WHERE id=?`, start.AlertID).Scan(&status); err != nil || status != "stopped" {
+		t.Fatalf("stop did not close home alert: %q, %v", status, err)
 	}
 }
 

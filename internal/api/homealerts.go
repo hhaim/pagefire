@@ -78,6 +78,24 @@ func (h *HomeAlertHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (h *HomeAlertHandler) ListActiveAlerts(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ListActiveAlerts(r.Context(), UserFromContext(r.Context()).ID)
+	if err != nil {
+		homeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (h *HomeAlertHandler) GetActiveAlert(w http.ResponseWriter, r *http.Request) {
+	item, err := h.service.GetActiveAlert(r.Context(), UserFromContext(r.Context()).ID, chi.URLParam(r, "alertID"))
+	if err != nil {
+		homeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (h *HomeAlertHandler) Feed(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parseListLimit(r)
 	filter := homealerts.FeedFilter{

@@ -22,7 +22,7 @@ func NewAuthHandler(authSvc *auth.Service, users store.UserStore) *AuthHandler {
 }
 
 // Routes returns all auth routes. Public routes (login, setup) have no auth.
-// Protected routes (me, logout, tokens) require SessionOrTokenAuth.
+// Protected routes require a browser session.
 func (h *AuthHandler) Routes(authMiddleware func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 
@@ -40,9 +40,6 @@ func (h *AuthHandler) Routes(authMiddleware func(http.Handler) http.Handler) chi
 		r.Get("/me", h.me)
 		r.Post("/logout", h.logout)
 		r.Put("/password", h.changePassword)
-		r.Post("/tokens", h.createToken)
-		r.Get("/tokens", h.listTokens)
-		r.Delete("/tokens/{id}", h.revokeToken)
 	})
 
 	return r
@@ -209,64 +206,6 @@ func (h *AuthHandler) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password updated"})
-}
-
-func (h *AuthHandler) createToken(w http.ResponseWriter, r *http.Request) {
-	user := UserFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-
-	var req struct {
-		Name string `json:"name"`
-	}
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name required")
-		return
-	}
-
-	rawToken, token, err := h.authSvc.GenerateAPIToken(r.Context(), user.ID, req.Name)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create token")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"token": rawToken, // shown once
-		"id":    token.ID,
-		"name":  token.Name,
-	})
-}
-
-func (h *AuthHandler) listTokens(w http.ResponseWriter, r *http.Request) {
-	user := UserFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-	tokens, err := h.users.ListAPITokens(r.Context(), user.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list tokens")
-		return
-	}
-	if tokens == nil {
-		tokens = []store.APIToken{}
-	}
-	writeJSON(w, http.StatusOK, tokens)
-}
-
-func (h *AuthHandler) revokeToken(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if err := h.users.RevokeAPIToken(r.Context(), id); err != nil {
-		handleStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
 // inviteCheck validates an invite token and returns the user info (no auth required).

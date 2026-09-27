@@ -93,7 +93,7 @@ func (s *Service) repeatOne(ctx context.Context, id string, now int64) error {
 		return nil
 	}
 	eventID := uuid.NewString()
-	_, err = tx.ExecContext(ctx, `INSERT INTO home_events(id,source,alert_id,kind,severity,summary,details,created_at) VALUES(?,?,?,'repeat',?,?,?,?)`, eventID, source, id, severity, summary, details, now)
+	_, err = tx.ExecContext(ctx, `INSERT INTO home_events(id,source,alert_id,kind,severity,summary,details,created_at,incident_key) VALUES(?,?,?,'repeat',?,?,?,?,?)`, eventID, source, id, severity, summary, details, now, key)
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,8 @@ func (s *Service) dispatchDue(ctx context.Context) error {
 					_, err = s.db.ExecContext(ctx, `INSERT INTO home_pushover_receipts(alert_id,receipt,expires_at) VALUES(?,?,?) ON CONFLICT(alert_id) DO UPDATE SET receipt=excluded.receipt,expires_at=excluded.expires_at,acknowledged_at=NULL,canceled_at=NULL,last_checked_at=0`, alertID.String, receipt, time.Now().UTC().Unix()+10800)
 				}
 			}
-		} else if pushover, ok := provider.(*pushoverProvider); ok && severity == "high" && eventKind != "repeat" {
+		} else if pushover, ok := provider.(*pushoverProvider); ok && severity == "high" {
+			// Info and stop events are also emergency priority in Pushover.
 			delivery.ExpireSeconds = 300
 			_, err = pushover.SendEmergency(ctx, delivery)
 		} else {
@@ -399,9 +400,6 @@ func (s *Service) weeklyReportAt(ctx context.Context, now time.Time) error {
 
 func (s *Service) cleanup(ctx context.Context) error {
 	cutoff := time.Now().UTC().AddDate(0, -6, 0).Unix()
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM alerts WHERE source='home' AND id IN (SELECT id FROM home_alerts WHERE status='stopped' AND stopped_at < ?)`, cutoff); err != nil {
-		return err
-	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM home_alerts WHERE status='stopped' AND stopped_at < ?`, cutoff); err != nil {
 		return err
 	}

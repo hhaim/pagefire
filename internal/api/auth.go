@@ -22,36 +22,11 @@ func UserFromContext(ctx context.Context) *store.User {
 	return u
 }
 
-// SessionOrTokenAuth middleware authenticates requests via:
-//  1. Session cookie (for browser UI)
-//  2. Bearer token — per-user API tokens (pf_ prefix)
-//
-// This supports both interactive and programmatic access.
-func SessionOrTokenAuth(authSvc *auth.Service) func(http.Handler) http.Handler {
+// SessionAuth authenticates browser requests with a session cookie.
+func SessionAuth(authSvc *auth.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 1. Try session cookie
 			if user := authSvc.CurrentUser(r.Context()); user != nil {
-				ctx := context.WithValue(r.Context(), userContextKey, user)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
-			// 2. Try Bearer token
-			authHeader := r.Header.Get("Authorization")
-			if authHeader != "" {
-				token := strings.TrimPrefix(authHeader, "Bearer ")
-				if token == authHeader {
-					writeError(w, http.StatusUnauthorized, "invalid authorization format, use Bearer token")
-					return
-				}
-
-				// 2a. Try per-user API token (pf_ prefix)
-				user, _, err := authSvc.ValidateAPIToken(r.Context(), token)
-				if err != nil {
-					writeError(w, http.StatusUnauthorized, "invalid token")
-					return
-				}
 				ctx := context.WithValue(r.Context(), userContextKey, user)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
@@ -62,9 +37,9 @@ func SessionOrTokenAuth(authSvc *auth.Service) func(http.Handler) http.Handler {
 	}
 }
 
-// EventIngestionAuth accepts the event-only key as well as the normal session or API token.
+// EventIngestionAuth accepts the event-only key or an authenticated browser session.
 func EventIngestionAuth(authSvc *auth.Service, home *homealerts.Service, users store.UserStore) func(http.Handler) http.Handler {
-	regular := SessionOrTokenAuth(authSvc)
+	regular := SessionAuth(authSvc)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if authSvc.CurrentUser(r.Context()) != nil {

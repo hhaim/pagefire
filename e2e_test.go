@@ -1,7 +1,6 @@
 package pagefire_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -12,13 +11,11 @@ import (
 	"github.com/pagefire/pagefire/internal/api"
 	"github.com/pagefire/pagefire/internal/auth"
 	"github.com/pagefire/pagefire/internal/homealerts"
-	"github.com/pagefire/pagefire/internal/notification"
-	"github.com/pagefire/pagefire/internal/oncall"
 	"github.com/pagefire/pagefire/internal/store"
 	"github.com/pagefire/pagefire/internal/store/sqlite"
 )
 
-// newE2ERouter creates an in-memory store, router, and admin API token for e2e tests.
+// newE2ERouter creates an in-memory store, router, and admin session for e2e tests.
 func newE2ERouter(t *testing.T) (http.Handler, *sqlite.SQLiteStore, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -32,16 +29,14 @@ func newE2ERouter(t *testing.T) (http.Handler, *sqlite.SQLiteStore, string) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	resolver := oncall.NewResolver(s.Schedules(), s.Users())
-	dispatcher := notification.NewDispatcher()
 	authSvc := auth.NewService(s.Users(), s.DB())
 	homeSvc, err := homealerts.New(s.DB(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := api.NewRouterWithHome(s, resolver, dispatcher, authSvc, homeSvc)
+	router := api.NewRouter(s, authSvc, homeSvc)
 
-	// Create an admin user and generate an API token for testing.
+	// Create an admin user and log in through the session API.
 	hash, err := auth.HashPassword("testpass123")
 	if err != nil {
 		t.Fatal(err)
@@ -57,12 +52,15 @@ func newE2ERouter(t *testing.T) (http.Handler, *sqlite.SQLiteStore, string) {
 	if err := s.Users().Create(ctx, adminUser); err != nil {
 		t.Fatal(err)
 	}
-	rawToken, _, err := authSvc.GenerateAPIToken(ctx, adminUser.ID, "e2e-token")
-	if err != nil {
-		t.Fatal(err)
+	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":"admin@e2e.dev","password":"testpass123"}`))
+	login.Header.Set("Content-Type", "application/json")
+	loginRR := httptest.NewRecorder()
+	router.ServeHTTP(loginRR, login)
+	if loginRR.Code != http.StatusOK || len(loginRR.Result().Cookies()) == 0 {
+		t.Fatalf("login: status=%d body=%s", loginRR.Code, loginRR.Body.String())
 	}
-
-	return router, s, rawToken
+	cookie := loginRR.Result().Cookies()[0]
+	return router, s, cookie.Name + "=" + cookie.Value
 }
 
 func TestHomeEventsAPI(t *testing.T) {
@@ -70,14 +68,14 @@ func TestHomeEventsAPI(t *testing.T) {
 	do := func(method, path, body string) (int, map[string]any) {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Cookie", token)
 		if body != "" {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		var response map[string]any
-		if rr.Body.Len() > 0 {
+		if rr.Body.Len() > 0 && strings.Contains(rr.Header().Get("Content-Type"), "application/json") {
 			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
 			}
@@ -100,17 +98,17 @@ func TestHomeEventsAPI(t *testing.T) {
 	if code != 200 || result["kind"] != "start" {
 		t.Fatalf("detail: %d %+v", code, result)
 	}
-	code, result = do("GET", "/api/v1/alerts/"+alertID, "")
-	if code != 200 || result["status"] != "triggered" {
-		t.Fatalf("canonical alert: %d %+v", code, result)
+	code, result = do("GET", "/api/v1/home-alerts/"+alertID, "")
+	if code != 200 || result["incident_key"] != "door" {
+		t.Fatalf("active home alert: %d %+v", code, result)
 	}
 	code, result = do("POST", "/api/v1/events", `{"event_id":"event-2","event":"stop","incident_key":"door"}`)
 	if code != 201 || result["status"] != "applied" {
 		t.Fatalf("stop: %d %+v", code, result)
 	}
-	code, result = do("GET", "/api/v1/alerts/"+alertID, "")
-	if code != 200 || result["status"] != "resolved" {
-		t.Fatalf("resolved alert: %d %+v", code, result)
+	code, _ = do("GET", "/api/v1/home-alerts/"+alertID, "")
+	if code != 404 {
+		t.Fatalf("stopped alert should not be active: %d", code)
 	}
 	code, result = do("GET", "/api/v1/alert-events?window=1h", "")
 	if code != 200 || result["total"] != float64(2) {
@@ -120,548 +118,14 @@ func TestHomeEventsAPI(t *testing.T) {
 	if code != 200 || result["started"] != float64(1) || result["stopped"] != float64(1) {
 		t.Fatalf("stats: %d %+v", code, result)
 	}
+	for _, path := range []string{"/api/v1/services", "/api/v1/escalation-policies", "/api/v1/integrations/old/alerts", "/api/v1/alerts", "/api/v1/auth/tokens"} {
+		code, _ = do("GET", path, "")
+		if code != http.StatusNotFound {
+			t.Fatalf("legacy route %s: status=%d, want 404", path, code)
+		}
+	}
 	code, result = do("PUT", "/api/v1/home-plugins/telegram", `{"destination":"1234","secret":"123:abc","enabled":false}`)
 	if code != 200 || result["configured"] != true || result["secret"] != nil {
 		t.Fatalf("plugin configuration: %d %+v", code, result)
 	}
-}
-
-// TestSmoke_FullAlertFlow boots the full router and walks through:
-// healthz -> create user -> create contact method -> create notification rule ->
-// create escalation policy -> add step -> add target -> create service ->
-// create integration key -> fire alert via integration webhook -> verify alert exists.
-func TestSmoke_FullAlertFlow(t *testing.T) {
-	router, _, token := newE2ERouter(t)
-
-	do := func(method, path string, body any, tkn string) (int, map[string]any) {
-		t.Helper()
-		var req *http.Request
-		if body != nil {
-			b, _ := json.Marshal(body)
-			req = httptest.NewRequest(method, path, bytes.NewReader(b))
-			req.Header.Set("Content-Type", "application/json")
-		} else {
-			req = httptest.NewRequest(method, path, nil)
-		}
-		if tkn != "" {
-			req.Header.Set("Authorization", "Bearer "+tkn)
-		}
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		var result map[string]any
-		_ = json.NewDecoder(rr.Body).Decode(&result)
-		return rr.Code, result
-	}
-
-	// 1. Health check
-	code, body := do("GET", "/healthz", nil, "")
-	if code != 200 {
-		t.Fatalf("healthz: want 200, got %d", code)
-	}
-	if body["status"] != "ok" {
-		t.Fatalf("healthz: want status=ok, got %v", body["status"])
-	}
-
-	// 2. Create user
-	code, body = do("POST", "/api/v1/users", map[string]string{
-		"name": "Alice", "email": "alice@example.com", "timezone": "UTC", "password": "TestPass123!",
-	}, token)
-	if code != 201 {
-		t.Fatalf("create user: want 201, got %d — %v", code, body)
-	}
-	userID := body["id"].(string)
-
-	// 3. Create contact method
-	code, body = do("POST", "/api/v1/users/"+userID+"/contact-methods", map[string]string{
-		"type": "email", "value": "alice@company.com",
-	}, token)
-	if code != 201 {
-		t.Fatalf("create contact method: want 201, got %d — %v", code, body)
-	}
-	cmID := body["id"].(string)
-
-	// 4. Create notification rule
-	code, body = do("POST", "/api/v1/users/"+userID+"/notification-rules", map[string]any{
-		"contact_method_id": cmID, "delay_minutes": 0,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create notification rule: want 201, got %d — %v", code, body)
-	}
-
-	// 5. Create escalation policy
-	code, body = do("POST", "/api/v1/escalation-policies", map[string]any{
-		"name": "Default", "repeat": 1,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create escalation policy: want 201, got %d — %v", code, body)
-	}
-	policyID := body["id"].(string)
-
-	// 6. Add escalation step
-	code, body = do("POST", "/api/v1/escalation-policies/"+policyID+"/steps", map[string]any{
-		"step_number": 0, "delay_minutes": 5,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create escalation step: want 201, got %d — %v", code, body)
-	}
-	stepID := body["id"].(string)
-
-	// 7. Add step target (user)
-	code, body = do("POST", "/api/v1/escalation-policies/"+policyID+"/steps/"+stepID+"/targets", map[string]string{
-		"target_type": "user", "target_id": userID,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create step target: want 201, got %d — %v", code, body)
-	}
-
-	// 8. Create service
-	code, body = do("POST", "/api/v1/services", map[string]string{
-		"name": "API Service", "escalation_policy_id": policyID,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create service: want 201, got %d — %v", code, body)
-	}
-	serviceID := body["id"].(string)
-	_ = serviceID
-
-	// 9. Create integration key
-	code, body = do("POST", "/api/v1/services/"+serviceID+"/integration-keys", map[string]string{
-		"name": "Monitoring",
-	}, token)
-	if code != 201 {
-		t.Fatalf("create integration key: want 201, got %d — %v", code, body)
-	}
-	secret := body["secret"].(string)
-	if len(secret) == 0 {
-		t.Fatal("integration key: expected non-empty secret")
-	}
-
-	// 10. Fire alert via integration webhook (no Bearer token — auth by key)
-	code, body = do("POST", "/api/v1/integrations/"+secret+"/alerts", map[string]string{
-		"summary": "CPU > 90%", "details": "Host web-1 at 95% for 5m",
-	}, "") // no auth token — the key IS the auth
-	if code != 201 {
-		t.Fatalf("fire alert: want 201, got %d — %v", code, body)
-	}
-	alertID := body["id"].(string)
-	if alertID == "" {
-		t.Fatal("fire alert: expected non-empty alert ID")
-	}
-	if body["status"] != "triggered" {
-		t.Fatalf("fire alert: want status=triggered, got %v", body["status"])
-	}
-	if body["summary"] != "CPU > 90%" {
-		t.Fatalf("fire alert: want summary='CPU > 90%%', got %v", body["summary"])
-	}
-
-	// 11. Verify alert appears in list
-	code, _ = do("GET", "/api/v1/alerts", nil, token)
-	if code != 200 {
-		t.Fatalf("list alerts: want 200, got %d", code)
-	}
-
-	// 12. Acknowledge alert
-	code, body = do("POST", "/api/v1/alerts/"+alertID+"/acknowledge", map[string]string{
-		"user_id": userID,
-	}, token)
-	if code != 200 {
-		t.Fatalf("acknowledge alert: want 200, got %d — %v", code, body)
-	}
-
-	// 13. Acknowledge again (idempotent — should succeed)
-	code, body = do("POST", "/api/v1/alerts/"+alertID+"/acknowledge", map[string]string{
-		"user_id": userID,
-	}, token)
-	if code != 200 {
-		t.Fatalf("acknowledge again (idempotent): want 200, got %d — %v", code, body)
-	}
-
-	// 14. Resolve alert
-	code, body = do("POST", "/api/v1/alerts/"+alertID+"/resolve", map[string]string{
-		"user_id": userID,
-	}, token)
-	if code != 200 {
-		t.Fatalf("resolve alert: want 200, got %d — %v", code, body)
-	}
-
-	// 15. Resolve again (idempotent — should succeed)
-	code, body = do("POST", "/api/v1/alerts/"+alertID+"/resolve", nil, token)
-	if code != 200 {
-		t.Fatalf("resolve again (idempotent): want 200, got %d — %v", code, body)
-	}
-
-	// 16. Verify alert is resolved
-	code, body = do("GET", "/api/v1/alerts/"+alertID, nil, token)
-	if code != 200 {
-		t.Fatalf("get alert: want 200, got %d", code)
-	}
-	if body["status"] != "resolved" {
-		t.Fatalf("get alert: want status=resolved, got %v", body["status"])
-	}
-
-	t.Log("smoke test passed: full alert lifecycle complete")
-}
-
-// TestSmoke_RoutingAndGrouping exercises routing rules and alert grouping end-to-end.
-func TestSmoke_RoutingAndGrouping(t *testing.T) {
-	router, _, token := newE2ERouter(t)
-
-	do := func(method, path string, body any, tkn string) (int, map[string]any) {
-		t.Helper()
-		var req *http.Request
-		if body != nil {
-			b, _ := json.Marshal(body)
-			req = httptest.NewRequest(method, path, bytes.NewReader(b))
-			req.Header.Set("Content-Type", "application/json")
-		} else {
-			req = httptest.NewRequest(method, path, nil)
-		}
-		if tkn != "" {
-			req.Header.Set("Authorization", "Bearer "+tkn)
-		}
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		var result map[string]any
-		_ = json.NewDecoder(rr.Body).Decode(&result)
-		return rr.Code, result
-	}
-
-	doList := func(method, path string, body any, tkn string) (int, []map[string]any) {
-		t.Helper()
-		var req *http.Request
-		if body != nil {
-			b, _ := json.Marshal(body)
-			req = httptest.NewRequest(method, path, bytes.NewReader(b))
-			req.Header.Set("Content-Type", "application/json")
-		} else {
-			req = httptest.NewRequest(method, path, nil)
-		}
-		if tkn != "" {
-			req.Header.Set("Authorization", "Bearer "+tkn)
-		}
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		var result []map[string]any
-		_ = json.NewDecoder(rr.Body).Decode(&result)
-		return rr.Code, result
-	}
-
-	// 1. Create two escalation policies
-	code, body := do("POST", "/api/v1/escalation-policies", map[string]any{
-		"name": "Default", "repeat": 0,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create default EP: %d — %v", code, body)
-	}
-	defaultEPID := body["id"].(string)
-
-	code, body = do("POST", "/api/v1/escalation-policies", map[string]any{
-		"name": "Database", "repeat": 0,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create db EP: %d — %v", code, body)
-	}
-	dbEPID := body["id"].(string)
-
-	// 2. Create service with default EP
-	code, body = do("POST", "/api/v1/services", map[string]string{
-		"name": "API", "escalation_policy_id": defaultEPID,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create service: %d — %v", code, body)
-	}
-	svcID := body["id"].(string)
-
-	// 3. Create routing rule: summary contains "database" -> use DB EP
-	code, body = do("POST", "/api/v1/services/"+svcID+"/routing-rules", map[string]any{
-		"condition_field": "summary", "condition_match_type": "contains",
-		"condition_value": "database", "escalation_policy_id": dbEPID,
-	}, token)
-	if code != 201 {
-		t.Fatalf("create routing rule: %d — %v", code, body)
-	}
-
-	// 4. Create integration key
-	code, body = do("POST", "/api/v1/services/"+svcID+"/integration-keys", map[string]string{
-		"name": "Monitor",
-	}, token)
-	if code != 201 {
-		t.Fatalf("create integration key: %d — %v", code, body)
-	}
-	secret := body["secret"].(string)
-
-	// 5. Fire alert matching routing rule
-	code, body = do("POST", "/api/v1/integrations/"+secret+"/alerts", map[string]string{
-		"summary": "database connection timeout", "dedup_key": "db-1",
-	}, "")
-	if code != 201 {
-		t.Fatalf("fire routed alert: %d — %v", code, body)
-	}
-	snapshot := body["escalation_policy_snapshot"].(string)
-	if !strings.Contains(snapshot, dbEPID) {
-		t.Fatalf("routed alert should use DB EP, snapshot: %s", snapshot)
-	}
-
-	// 6. Fire alert NOT matching — should use default EP
-	code, body = do("POST", "/api/v1/integrations/"+secret+"/alerts", map[string]string{
-		"summary": "high CPU", "dedup_key": "cpu-1",
-	}, "")
-	if code != 201 {
-		t.Fatalf("fire default alert: %d — %v", code, body)
-	}
-	snapshot2 := body["escalation_policy_snapshot"].(string)
-	if !strings.Contains(snapshot2, defaultEPID) {
-		t.Fatalf("default alert should use default EP, snapshot: %s", snapshot2)
-	}
-
-	// 7. Alert grouping: fire two alerts with same group_key
-	code, body = do("POST", "/api/v1/integrations/"+secret+"/alerts", map[string]string{
-		"summary": "disk full host-1", "group_key": "disk-full",
-	}, "")
-	if code != 201 {
-		t.Fatalf("fire grouped alert 1: %d — %v", code, body)
-	}
-	groupAlert1ID := body["id"].(string)
-
-	code, body = do("POST", "/api/v1/integrations/"+secret+"/alerts", map[string]string{
-		"summary": "disk full host-2", "group_key": "disk-full",
-	}, "")
-	if code != 201 {
-		t.Fatalf("fire grouped alert 2: %d — %v", code, body)
-	}
-	groupAlert2ID := body["id"].(string)
-
-	if groupAlert1ID == groupAlert2ID {
-		t.Fatal("grouped alerts should have different IDs (not dedup)")
-	}
-
-	// 8. Filter by group_key
-	code, groupedAlerts := doList("GET", "/api/v1/alerts?group_key=disk-full", nil, token)
-	if code != 200 {
-		t.Fatalf("list alerts by group_key: want 200, got %d", code)
-	}
-	if len(groupedAlerts) != 2 {
-		t.Fatalf("expected 2 grouped alerts, got %d", len(groupedAlerts))
-	}
-
-	t.Log("smoke test passed: routing rules and alert grouping work end-to-end")
-}
-
-// TestSmoke_AuthFlow exercises the full auth lifecycle:
-// setup (first admin) -> login -> create user (invite) -> invite accept -> API token -> use token.
-func TestSmoke_AuthFlow(t *testing.T) {
-	ctx := context.Background()
-
-	s, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	resolver := oncall.NewResolver(s.Schedules(), s.Users())
-	dispatcher := notification.NewDispatcher()
-	authSvc := auth.NewService(s.Users(), s.DB())
-	router := api.NewRouter(s, resolver, dispatcher, authSvc)
-
-	// cookieJar stores cookies between requests to simulate a browser session.
-	var cookies []*http.Cookie
-
-	doWithCookies := func(method, path string, body any) (int, map[string]any) {
-		t.Helper()
-		var req *http.Request
-		if body != nil {
-			b, _ := json.Marshal(body)
-			req = httptest.NewRequest(method, path, bytes.NewReader(b))
-			req.Header.Set("Content-Type", "application/json")
-		} else {
-			req = httptest.NewRequest(method, path, nil)
-		}
-		for _, c := range cookies {
-			req.AddCookie(c)
-		}
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-
-		// Collect Set-Cookie headers
-		if setCookies := rr.Result().Cookies(); len(setCookies) > 0 {
-			cookies = setCookies
-		}
-
-		var result map[string]any
-		_ = json.NewDecoder(rr.Body).Decode(&result)
-		return rr.Code, result
-	}
-
-	doWithToken := func(method, path string, body any, tkn string) (int, map[string]any) {
-		t.Helper()
-		var req *http.Request
-		if body != nil {
-			b, _ := json.Marshal(body)
-			req = httptest.NewRequest(method, path, bytes.NewReader(b))
-			req.Header.Set("Content-Type", "application/json")
-		} else {
-			req = httptest.NewRequest(method, path, nil)
-		}
-		req.Header.Set("Authorization", "Bearer "+tkn)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		var result map[string]any
-		_ = json.NewDecoder(rr.Body).Decode(&result)
-		return rr.Code, result
-	}
-
-	// 1. Setup check — should require setup
-	code, body := doWithCookies("GET", "/api/v1/auth/setup", nil)
-	if code != 200 {
-		t.Fatalf("setup check: want 200, got %d", code)
-	}
-	if body["setup_required"] != true {
-		t.Fatalf("setup_required: want true, got %v", body["setup_required"])
-	}
-
-	// 2. Create first admin via setup
-	code, body = doWithCookies("POST", "/api/v1/auth/setup", map[string]string{
-		"name": "Admin", "email": "admin@test.com", "password": "AdminPass123!",
-	})
-	if code != 201 {
-		t.Fatalf("setup: want 201, got %d — %v", code, body)
-	}
-	if body["role"] != "admin" {
-		t.Fatalf("setup: want role=admin, got %v", body["role"])
-	}
-
-	// 3. Setup again should fail (already done)
-	code, _ = doWithCookies("POST", "/api/v1/auth/setup", map[string]string{
-		"name": "Hacker", "email": "hack@test.com", "password": "HackPass123!",
-	})
-	if code != 409 {
-		t.Fatalf("setup again: want 409, got %d", code)
-	}
-
-	// 4. Login
-	cookies = nil // clear cookies
-	code, body = doWithCookies("POST", "/api/v1/auth/login", map[string]string{
-		"email": "admin@test.com", "password": "AdminPass123!",
-	})
-	if code != 200 {
-		t.Fatalf("login: want 200, got %d — %v", code, body)
-	}
-	if body["name"] != "Admin" {
-		t.Fatalf("login: want name=Admin, got %v", body["name"])
-	}
-
-	// 5. /me should return current user
-	code, body = doWithCookies("GET", "/api/v1/auth/me", nil)
-	if code != 200 {
-		t.Fatalf("me: want 200, got %d — %v", code, body)
-	}
-	if body["email"] != "admin@test.com" {
-		t.Fatalf("me: want email=admin@test.com, got %v", body["email"])
-	}
-
-	// 6. Wrong password should fail
-	code, _ = doWithCookies("POST", "/api/v1/auth/login", map[string]string{
-		"email": "admin@test.com", "password": "WrongPassword",
-	})
-	if code != 401 {
-		t.Fatalf("bad login: want 401, got %d", code)
-	}
-
-	// 7. Create user (generates invite URL)
-	code, body = doWithCookies("POST", "/api/v1/users", map[string]string{
-		"name": "Bob", "email": "bob@test.com",
-	})
-	if code != 201 {
-		t.Fatalf("create user: want 201, got %d — %v", code, body)
-	}
-	inviteURL, ok := body["invite_url"].(string)
-	if !ok || inviteURL == "" {
-		t.Fatalf("create user: expected invite_url, got %v", body)
-	}
-	// Extract token from invite URL (last path segment)
-	parts := strings.Split(inviteURL, "/invite/")
-	if len(parts) != 2 {
-		t.Fatalf("unexpected invite URL format: %s", inviteURL)
-	}
-	inviteToken := parts[1]
-
-	// 8. Validate invite token
-	code, body = doWithCookies("GET", "/api/v1/auth/invite/"+inviteToken, nil)
-	if code != 200 {
-		t.Fatalf("invite check: want 200, got %d — %v", code, body)
-	}
-	if body["name"] != "Bob" {
-		t.Fatalf("invite check: want name=Bob, got %v", body["name"])
-	}
-
-	// 9. Accept invite (set password)
-	code, body = doWithCookies("POST", "/api/v1/auth/invite/"+inviteToken, map[string]string{
-		"password": "BobPass1234!",
-	})
-	if code != 200 {
-		t.Fatalf("invite accept: want 200, got %d — %v", code, body)
-	}
-
-	// 10. Invite token should be used — can't reuse
-	code, _ = doWithCookies("GET", "/api/v1/auth/invite/"+inviteToken, nil)
-	if code != 410 {
-		t.Fatalf("invite reuse check: want 410 (Gone), got %d", code)
-	}
-
-	// 11. Bob can now login
-	cookies = nil
-	code, body = doWithCookies("POST", "/api/v1/auth/login", map[string]string{
-		"email": "bob@test.com", "password": "BobPass1234!",
-	})
-	if code != 200 {
-		t.Fatalf("bob login: want 200, got %d — %v", code, body)
-	}
-
-	// 12. Generate API token
-	code, body = doWithCookies("POST", "/api/v1/auth/tokens", map[string]string{
-		"name": "CI Token",
-	})
-	if code != 201 {
-		t.Fatalf("create token: want 201, got %d — %v", code, body)
-	}
-	apiToken, ok := body["token"].(string)
-	if !ok || !strings.HasPrefix(apiToken, "pf_") {
-		t.Fatalf("create token: expected pf_ prefix, got %v", body["token"])
-	}
-	tokenID := body["id"].(string)
-
-	// 13. Use API token to access alerts
-	code, _ = doWithToken("GET", "/api/v1/alerts", nil, apiToken)
-	if code != 200 {
-		t.Fatalf("alerts with API token: want 200, got %d", code)
-	}
-
-	// 14. List tokens
-	code, body = doWithCookies("GET", "/api/v1/auth/tokens", nil)
-	if code != 200 {
-		t.Fatalf("list tokens: want 200, got %d", code)
-	}
-
-	// 15. Revoke token
-	code, _ = doWithCookies("DELETE", "/api/v1/auth/tokens/"+tokenID, nil)
-	if code != 200 {
-		t.Fatalf("revoke token: want 200, got %d", code)
-	}
-
-	// 16. Revoked token should fail
-	code, _ = doWithToken("GET", "/api/v1/alerts", nil, apiToken)
-	if code != 401 {
-		t.Fatalf("revoked token: want 401, got %d", code)
-	}
-
-	// 17. Logout
-	code, _ = doWithCookies("POST", "/api/v1/auth/logout", nil)
-	if code != 200 {
-		t.Fatalf("logout: want 200, got %d", code)
-	}
-
-	t.Log("smoke test passed: full auth lifecycle (setup -> login -> invite -> API token -> revoke -> logout)")
 }

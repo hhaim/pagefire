@@ -25,7 +25,6 @@ All configuration is done through environment variables with the `PAGEFIRE_` pre
 |---|---|---|
 | `PAGEFIRE_PORT` | `3000` | HTTP listen port |
 | `PAGEFIRE_DATA_DIR` | `/data` | Directory for SQLite database and data files |
-| `PAGEFIRE_DATABASE_DRIVER` | `sqlite` | `sqlite` or `postgres` |
 | `PAGEFIRE_DATABASE_URL` | `<data_dir>/pagefire.db` | Database path (SQLite) or connection string (Postgres) |
 | `PAGEFIRE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
@@ -33,41 +32,11 @@ All configuration is done through environment variables with the `PAGEFIRE_` pre
 
 | Variable | Default | Description |
 |---|---|---|
-| `PAGEFIRE_ENGINE_INTERVAL_SECONDS` | `5` | How often the engine processes pending alerts and escalations |
-
-### SMTP (email notifications)
-
-| Variable | Default | Description |
-|---|---|---|
-| `PAGEFIRE_SMTP_HOST` | | SMTP server hostname |
-| `PAGEFIRE_SMTP_PORT` | `587` | SMTP server port |
-| `PAGEFIRE_SMTP_FROM` | | Sender email address |
-| `PAGEFIRE_SMTP_USERNAME` | | SMTP auth username |
-| `PAGEFIRE_SMTP_PASSWORD` | | SMTP auth password |
-
-### Slack
-
-| Variable | Default | Description |
-|---|---|---|
-| `PAGEFIRE_SLACK_BOT_TOKEN` | | Slack bot token for DM notifications |
-
-### Twilio (SMS/voice)
-
-| Variable | Default | Description |
-|---|---|---|
-| `PAGEFIRE_TWILIO_ACCOUNT_SID` | | Twilio account SID |
-| `PAGEFIRE_TWILIO_AUTH_TOKEN` | | Twilio auth token |
-| `PAGEFIRE_TWILIO_FROM_NUMBER` | | Twilio phone number (e.g. `+15551234567`) |
-
-### Security
-
-| Variable | Default | Description |
-|---|---|---|
-| `PAGEFIRE_ALLOW_PRIVATE_WEBHOOKS` | `false` | Allow webhook contact methods to target private/localhost IPs |
+| `PAGEFIRE_ENGINE_INTERVAL_SECONDS` | `5` | How often the Home Events worker checks deliveries, receipts, and repeats |
 
 ## Data Persistence
 
-PageFire stores its SQLite database in the `/data` directory inside the container. The `docker-compose.yml` maps this to a named Docker volume (`pagefire-data`), so your data survives container restarts and recreations.
+PageFire stores its SQLite database and the `home-alerts.key` plugin encryption key in the `/data` directory inside the container. The `docker-compose.yml` maps this to a named Docker volume (`pagefire-data`), so your data survives container restarts and recreations.
 
 To use a bind mount instead (useful for backups):
 
@@ -80,12 +49,7 @@ Make sure the host directory exists and is writable.
 
 ### Backups
 
-With SQLite, you can back up the database by copying the file while PageFire is running (SQLite supports concurrent reads):
-
-```bash
-docker compose exec pagefire cp /data/pagefire.db /data/pagefire-backup.db
-docker compose cp pagefire:/data/pagefire-backup.db ./pagefire-backup.db
-```
+Back up the database and `home-alerts.key` together. Use SQLite's online backup command or stop the container before copying database files, including any WAL file. Restoring the database without `home-alerts.key` makes saved plugin credentials unreadable.
 
 ## Creating an Admin User via CLI
 

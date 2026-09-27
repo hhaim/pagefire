@@ -151,7 +151,7 @@ func TestHomeAlertLifecycleAndDelivery(t *testing.T) {
 		t.Fatalf("stop plugin message did not confirm recovery with details: %q", stopMessage)
 	}
 
-	info, err := svc.Process(ctx, "source-1", EventRequest{EventID: "info-1", Event: "info", Summary: "Door opened"})
+	info, err := svc.Process(ctx, "source-1", EventRequest{EventID: "info-1", IncidentKey: "door", Event: "info", Summary: "Door opened"})
 	if err != nil || info.Status != "applied" || info.AlertID != "" {
 		t.Fatalf("info: %+v, %v", info, err)
 	}

@@ -118,7 +118,7 @@ func (s *Service) Feed(ctx context.Context, userID string, filter FeedFilter) (F
 	from := to - windowSeconds
 	all := []FeedEvent{}
 
-	homeRows, err := s.db.QueryContext(ctx, `SELECT e.id,e.client_event_id,e.alert_id,e.kind,e.severity,e.summary,e.details,e.created_at,COALESCE(h.incident_key,''),COALESCE(a.status,'') FROM home_events e LEFT JOIN home_alerts h ON h.id=e.alert_id LEFT JOIN alerts a ON a.id=e.alert_id WHERE e.source=? AND e.created_at>=? AND e.created_at<?`, userID, from, to)
+	homeRows, err := s.db.QueryContext(ctx, `SELECT e.id,e.client_event_id,e.alert_id,e.kind,e.severity,e.summary,e.details,e.created_at,e.incident_key,COALESCE(h.status,''),h.acknowledged_at IS NOT NULL FROM home_events e LEFT JOIN home_alerts h ON h.id=e.alert_id WHERE e.source=? AND e.created_at>=? AND e.created_at<?`, userID, from, to)
 	if err != nil {
 		return FeedResponse{}, err
 	}
@@ -126,38 +126,21 @@ func (s *Service) Feed(ctx context.Context, userID string, filter FeedFilter) (F
 		var event FeedEvent
 		var clientEventID, alertID sql.NullString
 		var severity string
-		if err := homeRows.Scan(&event.ID, &clientEventID, &alertID, &event.Type, &severity, &event.Summary, &event.Details, &event.CreatedAt, &event.Client, &event.Status); err != nil {
+		var acknowledged bool
+		if err := homeRows.Scan(&event.ID, &clientEventID, &alertID, &event.Type, &severity, &event.Summary, &event.Details, &event.CreatedAt, &event.Client, &event.Status, &acknowledged); err != nil {
 			homeRows.Close()
 			return FeedResponse{}, err
 		}
 		event.Origin, event.Source, event.Class = "home", "home", feedClass(severity)
-		event.Open = event.Status == "triggered" || event.Status == "acknowledged"
+		event.Open = event.Status == "active"
+		if event.Open && acknowledged {
+			event.Status = "acknowledged"
+		}
 		event.AlertID, event.ClientEventID = alertID.String, clientEventID.String
 		all = append(all, event)
 	}
 	err = homeRows.Err()
 	homeRows.Close()
-	if err != nil {
-		return FeedResponse{}, err
-	}
-
-	alertRows, err := s.db.QueryContext(ctx, `SELECT a.id,a.status,a.summary,a.details,a.source,COALESCE(s.name,a.service_id),CAST(strftime('%s',a.created_at) AS INTEGER) FROM alerts a LEFT JOIN services s ON s.id=a.service_id WHERE a.source!='home' AND CAST(strftime('%s',a.created_at) AS INTEGER)>=? AND CAST(strftime('%s',a.created_at) AS INTEGER)<?`, from, to)
-	if err != nil {
-		return FeedResponse{}, err
-	}
-	for alertRows.Next() {
-		var event FeedEvent
-		if err := alertRows.Scan(&event.ID, &event.Status, &event.Summary, &event.Details, &event.Source, &event.Client, &event.CreatedAt); err != nil {
-			alertRows.Close()
-			return FeedResponse{}, err
-		}
-		event.Origin, event.Type, event.Class = "service", "alert", "error"
-		event.Open = event.Status != "resolved"
-		event.AlertID = event.ID
-		all = append(all, event)
-	}
-	err = alertRows.Err()
-	alertRows.Close()
 	if err != nil {
 		return FeedResponse{}, err
 	}

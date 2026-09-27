@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { apiFetch, apiGet } from '../api.js'
 
 const newID = () => globalThis.crypto?.randomUUID?.() || `demo-${Date.now()}-${Math.random().toString(36).slice(2)}`
-const initial = () => ({ event_id: newID(), event: 'info', incident_key: '', severity: 'low', summary: 'Demo event', details: '', repeat_interval_seconds: 300 })
+const initial = () => ({ event_id: newID(), event: 'info', incident_key: 'demo-event', severity: 'low', summary: 'Demo event', details: '', repeat_interval_seconds: 300 })
 
 function initialFromURL() {
   const params = new URLSearchParams(window.location.search)
@@ -13,7 +13,7 @@ function initialFromURL() {
 
 function jsonFor(form) {
   const body = { event_id: form.event_id, event: form.event }
-  if (form.event !== 'info') body.incident_key = form.incident_key
+  body.incident_key = form.incident_key
   if (form.event !== 'stop') body.severity = form.severity
   if (form.summary) body.summary = form.summary
   if (form.details) body.details = form.details
@@ -30,16 +30,16 @@ export function HomeEventPlayground() {
   const [busy, setBusy] = useState(false)
 
   async function refreshAlerts() {
-    const { data } = await apiGet('/alerts?source=home&limit=1000')
+    const { data } = await apiGet('/home-alerts/active')
     if (data) setAlerts(data)
   }
   useEffect(() => { refreshAlerts() }, [])
   useEffect(() => {
     const alertID = new URLSearchParams(window.location.search).get('alert_id')
     if (!alertID) return
-    apiGet(`/alerts/${encodeURIComponent(alertID)}`).then(({ data }) => {
-      if (!data || data.source !== 'home' || data.status === 'resolved') return
-      const next = { ...initial(), event: 'stop', incident_key: data.group_key, summary: data.summary, details: data.details }
+    apiGet(`/home-alerts/${encodeURIComponent(alertID)}`).then(({ data }) => {
+      if (!data) return
+      const next = { ...initial(), event: 'stop', incident_key: data.incident_key, summary: data.summary, details: data.details }
       setForm(next)
       setJSON(jsonFor(next))
     })
@@ -58,6 +58,7 @@ export function HomeEventPlayground() {
 
   function field(name, value) {
     const next = { ...form, [name]: value }
+    if (name === 'event' && value !== form.event) next.event_id = newID()
     setForm(next)
     setJSON(jsonFor(next))
     setJSONError('')
@@ -100,12 +101,12 @@ export function HomeEventPlayground() {
     setBusy(false)
   }
 
-  const active = alerts.filter(a => a.status !== 'resolved')
+  const active = alerts
 
   return <div class="page">
     <div class="page-header"><h1>Event Playground</h1></div>
     <p class="text-muted">Build a request, inspect the exact JSON, and send it through the same event API used by external clients. Resending the same ID shows idempotency. <a href="/home-plugins">Configure notification plugins</a>. <a href="/event-ingestion">Create an ingestion key for external use</a>.</p>
-    <div class="home-grid">
+    <div class="home-grid home-playground-grid">
       <section class="home-card">
         <h2>Build event</h2>
         <label class="form-field"><span class="form-label">Event</span>
@@ -116,19 +117,20 @@ export function HomeEventPlayground() {
         <label class="form-field"><span class="form-label">Client event ID</span>
           <input class="form-control" value={form.event_id} onInput={e => field('event_id', e.target.value)} />
         </label>
-        {form.event !== 'info' && <label class="form-field"><span class="form-label">Incident key</span>
+        <p class="text-muted home-event-id-help">A new UUID is generated for each event type. Reuse an ID only to retry the same event.</p>
+        <label class="form-field"><span class="form-label">Incident key</span>
           <input class="form-control" value={form.incident_key} onInput={e => field('incident_key', e.target.value)} placeholder="boiler-room-water" />
-        </label>}
+        </label>
         {form.event === 'stop' && active.length > 0 && <label class="form-field"><span class="form-label">Choose active alert</span>
           <select class="form-control" onChange={e => {
             const alert = active.find(a => a.id === e.target.value)
             if (!alert) return
-            const next = { ...form, incident_key: alert.group_key, summary: alert.summary, details: alert.details }
+            const next = { ...form, incident_key: alert.incident_key, summary: alert.summary, details: alert.details }
             setForm(next)
             setJSON(jsonFor(next))
           }}>
             <option value="">Select an alert</option>
-            {active.map(a => <option key={a.id} value={a.id}>{a.summary} ({a.group_key})</option>)}
+            {active.map(a => <option key={a.id} value={a.id}>{a.summary} ({a.incident_key})</option>)}
           </select>
         </label>}
         {form.event !== 'stop' && <>
@@ -148,7 +150,7 @@ export function HomeEventPlayground() {
           <input class="form-control" type="number" min="300" value={form.repeat_interval_seconds} onInput={e => field('repeat_interval_seconds', e.target.value)} />
         </label>}
       </section>
-      <section class="home-card">
+      <section class="home-card home-json-card">
         <h2>Request JSON</h2>
         <textarea class="form-control home-json" spellcheck="false" value={json} onInput={e => editJSON(e.target.value)} />
         {jsonError && <p class="form-error">{jsonError}</p>}

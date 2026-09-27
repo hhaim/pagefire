@@ -53,6 +53,12 @@ export function EventIngestion() {
     "  -H 'Content-Type: application/json' \\",
     "  -d '{\"event_id\":\"demo-stop-001\",\"event\":\"stop\",\"incident_key\":\"demo-water\"}'",
   ].join('\n')
+  const infoEvent = [
+    "curl -X POST '" + endpoint + "' \\",
+    "  -H 'Authorization: Bearer " + key + "' \\",
+    "  -H 'Content-Type: application/json' \\",
+    "  -d '{\"event_id\":\"demo-info-001\",\"event\":\"info\",\"incident_key\":\"demo-water\",\"severity\":\"high\",\"summary\":\"Water sensor update\",\"details\":\"Reading 99\"}'",
+  ].join('\n')
 
   return <div class="page">
     <div class="page-header"><h1>Event Ingestion</h1></div>
@@ -73,7 +79,9 @@ export function EventIngestion() {
       <pre>{start}</pre>
       <h2>Stop the same alert</h2>
       <pre>{stop}</pre>
-      <p class="text-muted">Each event needs a new <code>event_id</code>. Start and stop use the same <code>incident_key</code>. <a href="/home-events">Try it in the playground</a>.</p>
+      <h2>Send a high info event</h2>
+      <pre>{infoEvent}</pre>
+      <p class="text-muted">Each event needs a new <code>event_id</code> and an <code>incident_key</code>. Start and stop use the same incident key. <a href="/home-events">Try it in the playground</a>.</p>
     </section>
   </div>
 }

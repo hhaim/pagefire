@@ -46,16 +46,7 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-func (s *SQLiteStore) Users() store.UserStore               { return &userStore{db: s.db} }
-func (s *SQLiteStore) Teams() store.TeamStore               { return &teamStore{db: s.db} }
-func (s *SQLiteStore) Services() store.ServiceStore          { return &serviceStore{db: s.db} }
-func (s *SQLiteStore) EscalationPolicies() store.EscalationPolicyStore {
-	return &escalationPolicyStore{db: s.db}
-}
-func (s *SQLiteStore) Schedules() store.ScheduleStore        { return &scheduleStore{db: s.db} }
-func (s *SQLiteStore) Alerts() store.AlertStore              { return &alertStore{db: s.db} }
-func (s *SQLiteStore) Notifications() store.NotificationStore { return &notificationStore{db: s.db} }
-func (s *SQLiteStore) Incidents() store.IncidentStore        { return &incidentStore{db: s.db} }
+func (s *SQLiteStore) Users() store.UserStore { return &userStore{db: s.db} }
 
 // DB returns the underlying *sql.DB, needed by the session store.
 func (s *SQLiteStore) DB() *sql.DB { return s.db }

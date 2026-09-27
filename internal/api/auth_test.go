@@ -31,12 +31,12 @@ func newTestAuthMiddleware(t *testing.T) (func(http.Handler) http.Handler, *auth
 	t.Cleanup(func() { s.Close() })
 
 	authSvc := auth.NewService(s.Users(), s.DB())
-	return SessionOrTokenAuth(authSvc), authSvc
+	return SessionAuth(authSvc), authSvc
 }
 
-// ---------- SessionOrTokenAuth ----------
+// ---------- SessionAuth ----------
 
-func TestSessionOrTokenAuth_NoAuthorizationHeader(t *testing.T) {
+func TestSessionAuth_NoAuthorizationHeader(t *testing.T) {
 	mw, _ := newTestAuthMiddleware(t)
 	handler := mw(okHandler)
 
@@ -55,7 +55,7 @@ func TestSessionOrTokenAuth_NoAuthorizationHeader(t *testing.T) {
 	}
 }
 
-func TestSessionOrTokenAuth_InvalidFormat(t *testing.T) {
+func TestSessionAuth_InvalidFormat(t *testing.T) {
 	mw, _ := newTestAuthMiddleware(t)
 	handler := mw(okHandler)
 
@@ -82,7 +82,7 @@ func TestSessionOrTokenAuth_InvalidFormat(t *testing.T) {
 	}
 }
 
-func TestSessionOrTokenAuth_WrongToken(t *testing.T) {
+func TestSessionAuth_WrongToken(t *testing.T) {
 	mw, _ := newTestAuthMiddleware(t)
 	handler := mw(okHandler)
 
@@ -135,8 +135,8 @@ func TestSecurityHeaders(t *testing.T) {
 
 	expected := map[string]string{
 		"X-Content-Type-Options":  "nosniff",
-		"X-Frame-Options":        "DENY",
-		"X-XSS-Protection":       "0",
+		"X-Frame-Options":         "DENY",
+		"X-XSS-Protection":        "0",
 		"Content-Security-Policy": "default-src 'none'",
 		"Referrer-Policy":         "no-referrer",
 	}

@@ -11,36 +11,13 @@ import (
 type Config struct {
 	Port           int          `koanf:"port"`
 	DatabaseURL    string       `koanf:"database_url"`
-	DatabaseDriver string       `koanf:"database_driver"` // "sqlite" or "postgres"
 	DataDir        string       `koanf:"data_dir"`
 	LogLevel       string       `koanf:"log_level"`
-	AllowPrivateWebhooks bool         `koanf:"allow_private_webhooks"`
-	Engine               EngineConfig `koanf:"engine"`
-	SMTP           SMTPConfig   `koanf:"smtp"`
-	Slack          SlackConfig  `koanf:"slack"`
-	Twilio         TwilioConfig `koanf:"twilio"`
+	Engine         EngineConfig `koanf:"engine"`
 }
 
 type EngineConfig struct {
 	IntervalSeconds int `koanf:"interval_seconds"`
-}
-
-type SMTPConfig struct {
-	Host     string `koanf:"host"`
-	Port     int    `koanf:"port"`
-	From     string `koanf:"from"`
-	Username string `koanf:"username"`
-	Password string `koanf:"password"`
-}
-
-type SlackConfig struct {
-	BotToken string `koanf:"bot_token"`
-}
-
-type TwilioConfig struct {
-	AccountSID string `koanf:"account_sid"`
-	AuthToken  string `koanf:"auth_token"`
-	FromNumber string `koanf:"from_number"`
 }
 
 // LoadConfig loads configuration from environment variables with PAGEFIRE_ prefix.
@@ -50,23 +27,20 @@ func LoadConfig() (*Config, error) {
 
 	// Defaults
 	k.Set("port", 3000)
-	k.Set("database_driver", "sqlite")
 	k.Set("data_dir", ".")
 	k.Set("log_level", "info")
 	k.Set("engine.interval_seconds", 5)
-	k.Set("smtp.port", 587)
 
 	// Environment variables: PAGEFIRE_PORT, PAGEFIRE_DATABASE_URL, etc.
-	// Known prefixes are mapped to nested struct fields; single underscores
-	// within field names are preserved (e.g. database_url, allow_private_webhooks).
-	nestedPrefixes := []string{"smtp_", "slack_", "engine_", "twilio_"}
+	// Known prefixes are mapped to nested struct fields.
+	nestedPrefixes := []string{"engine_"}
 
 	err := k.Load(env.Provider("PAGEFIRE_", ".", func(s string) string {
 		key := strings.ToLower(strings.TrimPrefix(s, "PAGEFIRE_"))
 		for _, prefix := range nestedPrefixes {
 			if strings.HasPrefix(key, prefix) {
 				// Replace only the first underscore to create nesting dot
-				// e.g. smtp_host → smtp.host, slack_bot_token → slack.bot_token
+				// e.g. engine_interval_seconds → engine.interval_seconds
 				return strings.Replace(key, "_", ".", 1)
 			}
 		}
@@ -82,7 +56,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Default SQLite path if no DATABASE_URL set
-	if cfg.DatabaseURL == "" && cfg.DatabaseDriver == "sqlite" {
+	if cfg.DatabaseURL == "" {
 		cfg.DatabaseURL = cfg.DataDir + "/pagefire.db"
 	}
 

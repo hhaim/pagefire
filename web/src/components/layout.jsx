@@ -6,8 +6,6 @@ const NAV_ITEMS = [
   { path: '/home-events', label: 'Event Playground', icon: '🧪' },
   { path: '/event-ingestion', label: 'Event Ingestion', icon: '🔑' },
   { path: '/home-plugins', label: 'Notification Plugins', icon: '🔌' },
-  { path: '/services', label: 'Services', icon: '⚙️' },
-  { path: '/escalation-policies', label: 'Escalation Policies', icon: '📋' },
   { path: '/users', label: 'Users', icon: '👤' },
 ]
 

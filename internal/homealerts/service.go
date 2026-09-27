@@ -44,12 +44,23 @@ type EventDetail struct {
 	ID            string     `json:"id"`
 	ClientEventID string     `json:"event_id,omitempty"`
 	AlertID       string     `json:"alert_id,omitempty"`
+	IncidentKey   string     `json:"incident_key"`
 	Kind          string     `json:"kind"`
 	Severity      string     `json:"severity"`
 	Summary       string     `json:"summary"`
 	Details       string     `json:"details"`
 	CreatedAt     int64      `json:"created_at"`
 	Deliveries    []Delivery `json:"deliveries,omitempty"`
+}
+
+type ActiveAlert struct {
+	ID           string `json:"id"`
+	IncidentKey  string `json:"incident_key"`
+	Severity     string `json:"severity"`
+	Summary      string `json:"summary"`
+	Details      string `json:"details"`
+	Acknowledged bool   `json:"acknowledged"`
+	StartedAt    int64  `json:"started_at"`
 }
 
 type Stats struct {
@@ -93,8 +104,8 @@ func validate(req *EventRequest) error {
 	if req.Event != "start" && req.Event != "stop" && req.Event != "info" {
 		return fmt.Errorf("%w: event must be start, stop, or info", ErrInvalid)
 	}
-	if len(req.IncidentKey) > 256 || ((req.Event == "start" || req.Event == "stop") && req.IncidentKey == "") {
-		return fmt.Errorf("%w: incident_key is required for start/stop (max 256 characters)", ErrInvalid)
+	if strings.TrimSpace(req.IncidentKey) == "" || len(req.IncidentKey) > 256 {
+		return fmt.Errorf("%w: incident_key is required (max 256 characters)", ErrInvalid)
 	}
 	if req.Severity == "" && req.Event == "info" {
 		req.Severity = "low"
@@ -158,21 +169,11 @@ func (s *Service) Process(ctx context.Context, source string, req EventRequest) 
 			return EventResult{}, err
 		} else {
 			result.AlertID, result.Status = uuid.NewString(), "applied"
-			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO escalation_policies(id,name,description,repeat) VALUES('home-events-policy','Home Events','Managed by the home event worker',0)`); err != nil {
-				return EventResult{}, err
-			}
-			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO services(id,name,description,escalation_policy_id) VALUES('home-events','Home Events','Alerts created by the event API and playground','home-events-policy')`); err != nil {
-				return EventResult{}, err
-			}
 			var next any
 			if req.Severity == "high" {
 				next = now + int64(req.RepeatIntervalSeconds)
 			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO home_alerts(id,source,incident_key,severity,summary,details,repeat_interval_seconds,next_repeat_at,started_at) VALUES(?,?,?,?,?,?,?,?,?)`, result.AlertID, source, req.IncidentKey, req.Severity, req.Summary, req.Details, req.RepeatIntervalSeconds, next, now)
-			if err != nil {
-				return EventResult{}, err
-			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO alerts(id,service_id,status,summary,details,source,dedup_key,group_key,escalation_policy_snapshot,next_escalation_at,created_at,severity) VALUES(?,'home-events','triggered',?,?,'home',?,?,'{}',NULL,datetime(?,'unixepoch'),?)`, result.AlertID, req.Summary, req.Details, source+":"+req.IncidentKey, req.IncidentKey, now, req.Severity)
 			if err != nil {
 				return EventResult{}, err
 			}
@@ -198,10 +199,6 @@ func (s *Service) Process(ctx context.Context, source string, req EventRequest) 
 			if err != nil {
 				return EventResult{}, err
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE alerts SET status='resolved',resolved_at=datetime(?,'unixepoch'),next_escalation_at=NULL WHERE id=?`, now, result.AlertID)
-			if err != nil {
-				return EventResult{}, err
-			}
 			if err := cancelPendingRepeats(ctx, tx, result.AlertID, "alert stopped"); err != nil {
 				return EventResult{}, err
 			}
@@ -211,7 +208,7 @@ func (s *Service) Process(ctx context.Context, source string, req EventRequest) 
 	}
 
 	eventID := uuid.NewString()
-	_, err = tx.ExecContext(ctx, `INSERT INTO home_events(id,source,client_event_id,alert_id,kind,severity,summary,details,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, eventID, source, req.EventID, nullable(result.AlertID), eventKind, req.Severity, req.Summary, req.Details, now)
+	_, err = tx.ExecContext(ctx, `INSERT INTO home_events(id,source,client_event_id,alert_id,kind,severity,summary,details,created_at,incident_key) VALUES(?,?,?,?,?,?,?,?,?,?)`, eventID, source, req.EventID, nullable(result.AlertID), eventKind, req.Severity, req.Summary, req.Details, now, req.IncidentKey)
 	if err != nil {
 		return EventResult{}, err
 	}
@@ -284,7 +281,7 @@ func (s *Service) enqueue(ctx context.Context, tx *sql.Tx, eventID, msg string, 
 func (s *Service) GetEvent(ctx context.Context, source, clientID string) (EventDetail, error) {
 	var d EventDetail
 	var alert sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT id,client_event_id,alert_id,kind,severity,summary,details,created_at FROM home_events WHERE source=? AND client_event_id=?`, source, clientID).Scan(&d.ID, &d.ClientEventID, &alert, &d.Kind, &d.Severity, &d.Summary, &d.Details, &d.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id,client_event_id,alert_id,kind,severity,summary,details,created_at,incident_key FROM home_events WHERE source=? AND client_event_id=?`, source, clientID).Scan(&d.ID, &d.ClientEventID, &alert, &d.Kind, &d.Severity, &d.Summary, &d.Details, &d.CreatedAt, &d.IncidentKey)
 	if err == sql.ErrNoRows {
 		return d, ErrNotFound
 	}
@@ -313,7 +310,7 @@ func (s *Service) GetEvent(ctx context.Context, source, clientID string) (EventD
 }
 
 func (s *Service) ListEvents(ctx context.Context, source string) ([]EventDetail, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT e.id,e.client_event_id,e.alert_id,e.kind,e.severity,COALESCE(NULLIF(e.summary,''),a.summary,''),e.details,e.created_at FROM home_events e LEFT JOIN home_alerts a ON a.id=e.alert_id WHERE e.source=? ORDER BY e.created_at DESC,e.id DESC LIMIT 20`, source)
+	rows, err := s.db.QueryContext(ctx, `SELECT e.id,e.client_event_id,e.alert_id,e.kind,e.severity,COALESCE(NULLIF(e.summary,''),a.summary,''),e.details,e.created_at,e.incident_key FROM home_events e LEFT JOIN home_alerts a ON a.id=e.alert_id WHERE e.source=? ORDER BY e.created_at DESC,e.id DESC LIMIT 20`, source)
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +319,7 @@ func (s *Service) ListEvents(ctx context.Context, source string) ([]EventDetail,
 	for rows.Next() {
 		var event EventDetail
 		var clientID, alertID sql.NullString
-		if err := rows.Scan(&event.ID, &clientID, &alertID, &event.Kind, &event.Severity, &event.Summary, &event.Details, &event.CreatedAt); err != nil {
+		if err := rows.Scan(&event.ID, &clientID, &alertID, &event.Kind, &event.Severity, &event.Summary, &event.Details, &event.CreatedAt, &event.IncidentKey); err != nil {
 			return nil, err
 		}
 		event.ClientEventID = clientID.String
@@ -330,6 +327,32 @@ func (s *Service) ListEvents(ctx context.Context, source string) ([]EventDetail,
 		items = append(items, event)
 	}
 	return items, rows.Err()
+}
+
+func (s *Service) ListActiveAlerts(ctx context.Context, source string) ([]ActiveAlert, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,incident_key,severity,summary,details,acknowledged_at IS NOT NULL,started_at FROM home_alerts WHERE source=? AND status='active' ORDER BY started_at DESC,id DESC`, source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActiveAlert{}
+	for rows.Next() {
+		var item ActiveAlert
+		if err := rows.Scan(&item.ID, &item.IncidentKey, &item.Severity, &item.Summary, &item.Details, &item.Acknowledged, &item.StartedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Service) GetActiveAlert(ctx context.Context, source, id string) (ActiveAlert, error) {
+	var item ActiveAlert
+	err := s.db.QueryRowContext(ctx, `SELECT id,incident_key,severity,summary,details,acknowledged_at IS NOT NULL,started_at FROM home_alerts WHERE source=? AND id=? AND status='active'`, source, id).Scan(&item.ID, &item.IncidentKey, &item.Severity, &item.Summary, &item.Details, &item.Acknowledged, &item.StartedAt)
+	if err == sql.ErrNoRows {
+		return ActiveAlert{}, ErrNotFound
+	}
+	return item, err
 }
 
 func (s *Service) Acknowledge(ctx context.Context, source, alertID, actor string) error {
@@ -358,10 +381,7 @@ func (s *Service) Acknowledge(ctx context.Context, source, alertID, actor string
 	if err := cancelPendingRepeats(ctx, tx, alertID, "alert acknowledged"); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE alerts SET status='acknowledged',acknowledged_at=datetime(?,'unixepoch'),next_escalation_at=NULL WHERE id=?`, now, alertID); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO home_events(id,source,alert_id,kind,created_at) VALUES(?,?,?,'acknowledge',?)`, uuid.NewString(), source, alertID, now)
+	_, err = tx.ExecContext(ctx, `INSERT INTO home_events(id,source,alert_id,kind,created_at,incident_key) VALUES(?,?,?,'acknowledge',?,(SELECT incident_key FROM home_alerts WHERE id=?))`, uuid.NewString(), source, alertID, now, alertID)
 	if err != nil {
 		return err
 	}

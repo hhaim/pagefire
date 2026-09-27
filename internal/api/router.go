@@ -11,16 +11,10 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/pagefire/pagefire/internal/auth"
 	"github.com/pagefire/pagefire/internal/homealerts"
-	"github.com/pagefire/pagefire/internal/notification"
-	"github.com/pagefire/pagefire/internal/oncall"
 	"github.com/pagefire/pagefire/internal/store"
 )
 
-func NewRouter(s store.Store, resolver *oncall.Resolver, dispatcher *notification.Dispatcher, authSvc *auth.Service, frontendFS ...fs.FS) http.Handler {
-	return NewRouterWithHome(s, resolver, dispatcher, authSvc, nil, frontendFS...)
-}
-
-func NewRouterWithHome(s store.Store, resolver *oncall.Resolver, dispatcher *notification.Dispatcher, authSvc *auth.Service, home *homealerts.Service, frontendFS ...fs.FS) http.Handler {
+func NewRouter(s store.Store, authSvc *auth.Service, home *homealerts.Service, frontendFS ...fs.FS) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -50,19 +44,12 @@ func NewRouterWithHome(s store.Store, resolver *oncall.Resolver, dispatcher *not
 
 	// Auth endpoints (single mount — public + protected routes handled internally)
 	authHandler := NewAuthHandler(authSvc, s.Users())
-	authMiddleware := SessionOrTokenAuth(authSvc)
+	authMiddleware := SessionAuth(authSvc)
 	r.Mount("/api/v1/auth", authHandler.Routes(authMiddleware))
 
-	// Integration webhooks (authenticated by integration key secret, rate-limited)
 	integrationLimiter := NewRateLimiter(60, time.Minute)
-	r.Group(func(r chi.Router) {
-		r.Use(RateLimitMiddleware(integrationLimiter))
-		r.Mount("/api/v1/integrations", NewIntegrationHandler(s.Services(), s.Alerts(), s.EscalationPolicies()).Routes())
-	})
-	if home != nil {
-		h := NewHomeAlertHandler(home)
-		r.With(RateLimitMiddleware(integrationLimiter), EventIngestionAuth(authSvc, home, s.Users())).Post("/api/v1/events", h.CreateEvent)
-	}
+	h := NewHomeAlertHandler(home)
+	r.With(RateLimitMiddleware(integrationLimiter), EventIngestionAuth(authSvc, home, s.Users())).Post("/api/v1/events", h.CreateEvent)
 
 	// Authenticated API routes
 	apiLimiter := NewRateLimiter(1000, time.Minute)
@@ -71,40 +58,27 @@ func NewRouterWithHome(s store.Store, resolver *oncall.Resolver, dispatcher *not
 		r.Use(authMiddleware)
 
 		r.Route("/api/v1", func(r chi.Router) {
-			scheduleHandler := NewScheduleHandler(s.Schedules())
-
-			// Admin-only writes, all users can read
 			r.Group(func(r chi.Router) {
 				r.Use(RequireAdminForWrites)
 				r.Mount("/users", NewUserHandler(s.Users()).Routes())
-				r.Mount("/teams", NewTeamHandler(s.Teams()).Routes())
-				r.Mount("/services", NewServiceHandler(s.Services(), s.Alerts(), s.EscalationPolicies()).Routes())
-				r.Mount("/escalation-policies", NewEscalationPolicyHandler(s.EscalationPolicies()).Routes())
-				r.Mount("/schedules", scheduleHandler.Routes())
 			})
 
-			// All authenticated users: alerts, incidents, on-call, schedule overrides
-			r.Mount("/alerts", NewAlertHandler(s.Alerts(), s.Services(), s.EscalationPolicies(), s.Incidents()).Routes())
-			r.Mount("/incidents", NewIncidentHandler(s.Incidents()).Routes())
-			r.Mount("/oncall", NewOnCallHandler(resolver).Routes())
-			r.Mount("/schedule-overrides", scheduleHandler.OverrideRoutes())
-			if home != nil {
-				h := NewHomeAlertHandler(home)
-				r.Get("/events", h.ListEvents)
-				r.Get("/alert-events", h.Feed)
-				r.Get("/events/{eventID}", h.GetEvent)
-				r.Get("/home-stats", h.Stats)
-				r.Group(func(r chi.Router) {
-					r.Use(RequireAdminForWrites)
-					r.Get("/event-ingestion-key", h.GetIngestionKey)
-					r.Post("/event-ingestion-key", h.RotateIngestionKey)
-					r.Delete("/event-ingestion-key", h.RevokeIngestionKey)
-					r.Get("/home-plugins", h.Plugins)
-					r.Put("/home-plugins/{kind}", h.PutPlugin)
-					r.Delete("/home-plugins/{kind}", h.DeletePlugin)
-					r.Post("/home-plugins/{kind}/test", h.TestPlugin)
-				})
-			}
+			r.Get("/events", h.ListEvents)
+			r.Get("/alert-events", h.Feed)
+			r.Get("/events/{eventID}", h.GetEvent)
+			r.Get("/home-alerts/active", h.ListActiveAlerts)
+			r.Get("/home-alerts/{alertID}", h.GetActiveAlert)
+			r.Get("/home-stats", h.Stats)
+			r.Group(func(r chi.Router) {
+				r.Use(RequireAdminForWrites)
+				r.Get("/event-ingestion-key", h.GetIngestionKey)
+				r.Post("/event-ingestion-key", h.RotateIngestionKey)
+				r.Delete("/event-ingestion-key", h.RevokeIngestionKey)
+				r.Get("/home-plugins", h.Plugins)
+				r.Put("/home-plugins/{kind}", h.PutPlugin)
+				r.Delete("/home-plugins/{kind}", h.DeletePlugin)
+				r.Post("/home-plugins/{kind}/test", h.TestPlugin)
+			})
 		})
 	})
 
@@ -126,10 +100,12 @@ func spaHandler(assets fs.FS) http.HandlerFunc {
 	indexHTML, _ := fs.ReadFile(assets, "index.html")
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Relax CSP for frontend pages (override the strict API CSP)
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
 		}
+		// Relax CSP for frontend pages (override the strict API CSP)
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
 
 		// Try to serve the exact file (static assets like JS, CSS)
 		path := strings.TrimPrefix(r.URL.Path, "/")

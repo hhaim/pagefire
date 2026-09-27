@@ -34,24 +34,3 @@ func createTestUser(t *testing.T, s *SQLiteStore, name, email string) *store.Use
 	}
 	return u
 }
-
-// createTestEscalationPolicy creates an escalation policy and returns it.
-func createTestEscalationPolicy(t *testing.T, s *SQLiteStore, name string) *store.EscalationPolicy {
-	t.Helper()
-	ep := &store.EscalationPolicy{Name: name}
-	if err := s.EscalationPolicies().Create(context.Background(), ep); err != nil {
-		t.Fatalf("creating test escalation policy: %v", err)
-	}
-	return ep
-}
-
-// createTestService creates a service with a real escalation policy.
-func createTestService(t *testing.T, s *SQLiteStore) *store.Service {
-	t.Helper()
-	ep := createTestEscalationPolicy(t, s, "test-ep")
-	svc := &store.Service{Name: "test-svc", EscalationPolicyID: ep.ID}
-	if err := s.Services().Create(context.Background(), svc); err != nil {
-		t.Fatalf("creating test service: %v", err)
-	}
-	return svc
-}

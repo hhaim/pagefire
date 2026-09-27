@@ -75,7 +75,7 @@ export function Alerts() {
   }
 
   return <div class="page">
-    <div class="page-header"><h1>Alerts & Events</h1></div>
+    <div class="page-header"><h1>Home Events</h1></div>
     <div class="stat-cards">
       <div class="stat-card stat-card-blue"><div class="stat-value">{data?.total ?? '—'}</div><div class="stat-label">Events in window</div></div>
       <div class="stat-card stat-card-red"><div class="stat-value">{data?.open_alerts ?? '—'}</div><div class="stat-label">Open alerts</div></div>
@@ -109,7 +109,7 @@ export function Alerts() {
             {(data?.facets?.sources || []).map(value => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>
-        <label>Client / service
+        <label>Client
           <select class="form-control" value={client} onChange={e => setClient(e.target.value)}>
             <option value="">All clients</option>
             {(data?.facets?.clients || []).map(value => <option key={value} value={value}>{value}</option>)}
@@ -154,7 +154,7 @@ export function Alerts() {
       <div class="card-header-row"><h3>Events</h3><span class="text-muted">{data?.total || 0} matching · {events.length} on this page · double-click an open Home Event to prepare its stop</span></div>
       {loading ? <div class="loading">Loading...</div> : events.length === 0 ? <p class="text-muted">No events match these filters.</p> : <>
         <div class="event-table-wrap"><table class="data-table">
-          <thead><tr><th>Time</th><th>Class</th><th>Type</th><th>Message</th><th>Source</th><th>Client / service</th><th>Open</th></tr></thead>
+          <thead><tr><th>Time</th><th>Class</th><th>Type</th><th>Message</th><th>Source</th><th>Client</th><th>Open</th></tr></thead>
           <tbody>{events.map(event => <tr key={event.origin + event.id} class="clickable-row" onClick={() => setSelected(event)} onDblClick={() => {
             if (event.origin === 'home' && event.open && event.alert_id) window.location.href = `/home-events?event=stop&alert_id=${encodeURIComponent(event.alert_id)}`
           }}>
@@ -178,7 +178,6 @@ export function Alerts() {
       <p><strong>{selected.summary || selected.type}</strong> · {eventTime(selected.created_at)}</p>
       {selected.details && <pre>{selected.details}</pre>}
       {selected.origin === 'home' && selected.open && selected.alert_id && <a href={`/home-events?event=stop&alert_id=${encodeURIComponent(selected.alert_id)}`}>Prepare stop event</a>}
-      {selected.origin === 'service' && <a href={'/alerts/' + selected.alert_id}>Open service alert</a>}
       <details><summary>Event JSON and deliveries</summary><pre>{JSON.stringify(eventDetail || selected, null, 2)}</pre></details>
     </section>}
   </div>

@@ -9,13 +9,12 @@ import (
 	"testing"
 
 	"github.com/pagefire/pagefire/internal/auth"
-	"github.com/pagefire/pagefire/internal/store"
 	"github.com/pagefire/pagefire/internal/store/sqlite"
 )
 
 // ---------- Expired / Invalid Session Cookie ----------
 
-func TestSessionOrTokenAuth_ExpiredSessionCookie(t *testing.T) {
+func TestSessionAuth_ExpiredSessionCookie(t *testing.T) {
 	// An invalid/garbage session cookie should be treated as unauthenticated.
 	s, err := sqlite.New(":memory:")
 	if err != nil {
@@ -27,7 +26,7 @@ func TestSessionOrTokenAuth_ExpiredSessionCookie(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 
 	authSvc := auth.NewService(s.Users(), s.DB())
-	mw := SessionOrTokenAuth(authSvc)
+	mw := SessionAuth(authSvc)
 	handler := mw(okHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -43,66 +42,6 @@ func TestSessionOrTokenAuth_ExpiredSessionCookie(t *testing.T) {
 	json.NewDecoder(rr.Body).Decode(&body)
 	if body["error"] != "authentication required" {
 		t.Errorf("error = %q, want %q", body["error"], "authentication required")
-	}
-}
-
-// ---------- Revoked API Token ----------
-
-func TestSessionOrTokenAuth_RevokedAPIToken(t *testing.T) {
-	ctx := context.Background()
-	s, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	// Create a user
-	user := &store.User{
-		Name:     "test-user",
-		Email:    "test@example.com",
-		Role:     store.RoleAdmin,
-		Timezone: "UTC",
-		IsActive: true,
-	}
-	hash, err := auth.HashPassword("TestPass1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	user.PasswordHash = hash
-	if err := s.Users().Create(ctx, user); err != nil {
-		t.Fatal(err)
-	}
-
-	authSvc := auth.NewService(s.Users(), s.DB())
-
-	// Generate a token, then revoke it
-	rawToken, token, err := authSvc.GenerateAPIToken(ctx, user.ID, "test-token")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Users().RevokeAPIToken(ctx, token.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Try to use the revoked token
-	mw := SessionOrTokenAuth(authSvc)
-	handler := mw(okHandler)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer "+rawToken)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("revoked token: status = %d, want %d", rr.Code, http.StatusUnauthorized)
-	}
-	var body map[string]string
-	json.NewDecoder(rr.Body).Decode(&body)
-	if body["error"] != "invalid token" {
-		t.Errorf("error = %q, want %q", body["error"], "invalid token")
 	}
 }
 
@@ -205,118 +144,5 @@ func TestValidatePassword_Complexity(t *testing.T) {
 				t.Errorf("validatePassword(%q) = %v, want nil", tt.password, err)
 			}
 		})
-	}
-}
-
-// ---------- Valid API Token Works ----------
-
-func TestSessionOrTokenAuth_ValidAPIToken(t *testing.T) {
-	ctx := context.Background()
-	s, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	user := &store.User{
-		Name:     "token-user",
-		Email:    "token@example.com",
-		Role:     store.RoleAdmin,
-		Timezone: "UTC",
-		IsActive: true,
-	}
-	hash, err := auth.HashPassword("TestPass1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	user.PasswordHash = hash
-	if err := s.Users().Create(ctx, user); err != nil {
-		t.Fatal(err)
-	}
-
-	authSvc := auth.NewService(s.Users(), s.DB())
-	rawToken, _, err := authSvc.GenerateAPIToken(ctx, user.ID, "my-token")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify the token grants access
-	mw := SessionOrTokenAuth(authSvc)
-	capturedUser := false
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u := UserFromContext(r.Context())
-		if u != nil && u.ID == user.ID {
-			capturedUser = true
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer "+rawToken)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("valid token: status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	if !capturedUser {
-		t.Error("valid token: expected user to be set in context")
-	}
-}
-
-// ---------- Inactive User Token Rejected ----------
-
-func TestSessionOrTokenAuth_InactiveUserToken(t *testing.T) {
-	ctx := context.Background()
-	s, err := sqlite.New(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	user := &store.User{
-		Name:     "inactive-user",
-		Email:    "inactive@example.com",
-		Role:     store.RoleUser,
-		Timezone: "UTC",
-		IsActive: true,
-	}
-	hash, err := auth.HashPassword("TestPass1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	user.PasswordHash = hash
-	if err := s.Users().Create(ctx, user); err != nil {
-		t.Fatal(err)
-	}
-
-	authSvc := auth.NewService(s.Users(), s.DB())
-	rawToken, _, err := authSvc.GenerateAPIToken(ctx, user.ID, "soon-disabled")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Deactivate the user via direct SQL since Update() does not persist is_active.
-	// This is a known gap in the store layer (Update omits is_active from the query).
-	if _, err := s.DB().ExecContext(ctx, `UPDATE users SET is_active = 0 WHERE id = ?`, user.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	mw := SessionOrTokenAuth(authSvc)
-	handler := mw(okHandler)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer "+rawToken)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("inactive user token: status = %d, want %d", rr.Code, http.StatusUnauthorized)
 	}
 }

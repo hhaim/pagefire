@@ -5,10 +5,7 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -35,7 +32,7 @@ func NewService(users store.UserStore, db *sql.DB) *Service {
 	sm.IdleTimeout = 2 * time.Hour
 	sm.Cookie.Name = "pagefire_session"
 	sm.Cookie.HttpOnly = true
-	sm.Cookie.SameSite = 3 // Lax
+	sm.Cookie.SameSite = 3  // Lax
 	sm.Cookie.Secure = true // localhost is treated as a secure context by browsers
 
 	return &Service{
@@ -118,53 +115,4 @@ func (s *Service) CurrentUser(ctx context.Context) (user *store.User) {
 		return nil
 	}
 	return user
-}
-
-// GenerateAPIToken creates a new API token, returning the raw token string
-// (shown once to the user) and persisting the SHA-256 hash.
-func (s *Service) GenerateAPIToken(ctx context.Context, userID, name string) (string, *store.APIToken, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", nil, fmt.Errorf("generating token: %w", err)
-	}
-
-	prefix := hex.EncodeToString(raw[:4]) // 8 char prefix for identification
-	token := "pf_" + hex.EncodeToString(raw)
-	hash := sha256.Sum256([]byte(token))
-	tokenHash := hex.EncodeToString(hash[:])
-
-	t := &store.APIToken{
-		UserID: userID,
-		Name:   name,
-		Prefix: prefix,
-	}
-	if err := s.users.CreateAPIToken(ctx, t, tokenHash); err != nil {
-		return "", nil, err
-	}
-	return token, t, nil
-}
-
-// ValidateAPIToken looks up a raw token by its SHA-256 hash and returns the
-// owning user. Returns store.ErrNotFound if invalid or revoked.
-func (s *Service) ValidateAPIToken(ctx context.Context, rawToken string) (*store.User, *store.APIToken, error) {
-	hash := sha256.Sum256([]byte(rawToken))
-	tokenHash := hex.EncodeToString(hash[:])
-
-	token, err := s.users.GetAPITokenByHash(ctx, tokenHash)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	user, err := s.users.Get(ctx, token.UserID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !user.IsActive {
-		return nil, nil, store.ErrNotFound
-	}
-
-	// Update last used (best-effort, async-safe)
-	_ = s.users.TouchAPIToken(ctx, token.ID)
-
-	return user, token, nil
 }

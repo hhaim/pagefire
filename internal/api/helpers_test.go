@@ -160,33 +160,6 @@ func TestValidateTimezone(t *testing.T) {
 	}
 }
 
-// ---------- validateRole ----------
-
-func TestValidateRole(t *testing.T) {
-	tests := []struct {
-		role string
-		want bool
-	}{
-		{"admin", true},
-		{"user", true},
-		{"viewer", true},
-		{"superadmin", false},
-		{"", false},
-		{"Admin", false},
-		{"USER", false},
-		{"owner", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%q", tt.role), func(t *testing.T) {
-			got := validateRole(tt.role)
-			if got != tt.want {
-				t.Errorf("validateRole(%q) = %v, want %v", tt.role, got, tt.want)
-			}
-		})
-	}
-}
-
 // ---------- storeErrorStatus ----------
 
 func TestStoreErrorStatus(t *testing.T) {
