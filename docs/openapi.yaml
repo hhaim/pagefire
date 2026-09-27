@@ -45,6 +45,8 @@ tags:
     description: Inbound webhooks (generic, Grafana, Prometheus) — authenticated by integration key
   - name: Schedule Overrides
     description: Schedule overrides accessible to all authenticated users
+  - name: Home Alerts
+    description: Home event ingestion, delivery debugging, statistics, and global notification plugins
 
 security:
   - cookieAuth: []
@@ -2111,6 +2113,174 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /events:
+    get:
+      operationId: listHomeEvents
+      tags: [Home Alerts]
+      summary: List the current user's 20 most recent home events
+      responses:
+        '200': { description: Recent event records, including playground events }
+    post:
+      operationId: createHomeEvent
+      tags: [Home Alerts]
+      summary: Submit a start, stop, or info event
+      description: The client supplies event_id. Duplicate IDs and active start events do not send another notification. Accepts a session, personal API token, or the single event-only ingestion key from Event Ingestion settings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, event]
+              properties:
+                event_id: { type: string, maxLength: 128 }
+                event: { type: string, enum: [start, stop, info] }
+                incident_key: { type: string, description: Required for start and stop }
+                severity: { type: string, enum: [low, mid, high], description: Required for start; info defaults to low }
+                summary: { type: string, maxLength: 500, description: Required for start and info }
+                details: { type: string, maxLength: 10000 }
+                repeat_interval_seconds: { type: integer, minimum: 300, default: 300, description: High start events only }
+      responses:
+        '201': { description: Event applied }
+        '200': { description: Duplicate or inactive event ignored }
+        '400': { description: Invalid event }
+
+  /events/{event_id}:
+    get:
+      operationId: getHomeEvent
+      tags: [Home Alerts]
+      summary: Inspect an event and its plugin delivery attempts
+      parameters:
+        - in: path
+          name: event_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Event and delivery status }
+        '404': { description: Event not found }
+
+  /alert-events:
+    get:
+      operationId: listCombinedAlertEvents
+      tags: [Home Alerts]
+      summary: Filter the combined Home Events and service-alert feed
+      parameters:
+        - in: query
+          name: window
+          schema: { type: string, enum: [1h, 1d, 1w, 1m], default: 1d }
+        - in: query
+          name: type
+          schema: { type: string }
+        - in: query
+          name: class
+          schema: { type: string, enum: [info, warning, error] }
+        - in: query
+          name: source
+          schema: { type: string }
+        - in: query
+          name: client
+          schema: { type: string }
+        - in: query
+          name: open
+          schema: { type: boolean }
+        - in: query
+          name: message_regex
+          schema: { type: string }
+      responses:
+        '200': { description: Filtered events, stacked buckets, facets, type counts, and open-alert count }
+
+  /home-stats:
+    get:
+      operationId: getHomeStats
+      tags: [Home Alerts]
+      summary: Get home-event and delivery counts
+      parameters:
+        - in: query
+          name: from
+          schema: { type: integer, format: int64, description: Unix seconds }
+        - in: query
+          name: to
+          schema: { type: integer, format: int64, description: Unix seconds }
+      responses:
+        '200': { description: Counts for the selected period }
+
+  /event-ingestion-key:
+    get:
+      operationId: getEventIngestionKey
+      tags: [Home Alerts]
+      summary: Show whether the single event ingestion key is configured
+      responses:
+        '200': { description: Key prefix and creation time; raw key is never returned }
+    post:
+      operationId: rotateEventIngestionKey
+      tags: [Home Alerts]
+      summary: Create or rotate the single event ingestion key (admin)
+      responses:
+        '201': { description: Raw key, returned once }
+    delete:
+      operationId: revokeEventIngestionKey
+      tags: [Home Alerts]
+      summary: Revoke the event ingestion key (admin)
+      responses:
+        '204': { description: Key revoked }
+
+  /home-plugins:
+    get:
+      operationId: listHomePlugins
+      tags: [Home Alerts]
+      summary: List plugin types and configured global destinations
+      responses:
+        '200': { description: Plugin settings with secrets redacted }
+
+  /home-plugins/{kind}:
+    put:
+      operationId: configureHomePlugin
+      tags: [Home Alerts]
+      summary: Configure Telegram or Pushover (admin)
+      parameters:
+        - in: path
+          name: kind
+          required: true
+          schema: { type: string, enum: [telegram, pushover] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination, enabled]
+              properties:
+                destination: { type: string }
+                secret: { type: string, description: Empty string keeps the existing token }
+                enabled: { type: boolean }
+      responses:
+        '200': { description: Plugin configured; secret redacted }
+    delete:
+      operationId: deleteHomePlugin
+      tags: [Home Alerts]
+      summary: Remove plugin configuration (admin)
+      parameters:
+        - in: path
+          name: kind
+          required: true
+          schema: { type: string, enum: [telegram, pushover] }
+      responses:
+        '204': { description: Plugin removed }
+
+  /home-plugins/{kind}/test:
+    post:
+      operationId: testHomePlugin
+      tags: [Home Alerts]
+      summary: Send a test notification (admin)
+      parameters:
+        - in: path
+          name: kind
+          required: true
+          schema: { type: string, enum: [telegram, pushover] }
+      responses:
+        '200': { description: Test message accepted by provider }
+        '502': { description: Provider rejected the test message }
 
 components:
   securitySchemes:

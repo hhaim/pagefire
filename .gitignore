@@ -4,6 +4,7 @@ pagefire
 *.sqlite
 *.db-shm
 *.db-wal
+home-alerts.key
 tmp/
 .env
 .env.*

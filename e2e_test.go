@@ -11,6 +11,7 @@ import (
 
 	"github.com/pagefire/pagefire/internal/api"
 	"github.com/pagefire/pagefire/internal/auth"
+	"github.com/pagefire/pagefire/internal/homealerts"
 	"github.com/pagefire/pagefire/internal/notification"
 	"github.com/pagefire/pagefire/internal/oncall"
 	"github.com/pagefire/pagefire/internal/store"
@@ -34,7 +35,11 @@ func newE2ERouter(t *testing.T) (http.Handler, *sqlite.SQLiteStore, string) {
 	resolver := oncall.NewResolver(s.Schedules(), s.Users())
 	dispatcher := notification.NewDispatcher()
 	authSvc := auth.NewService(s.Users(), s.DB())
-	router := api.NewRouter(s, resolver, dispatcher, authSvc)
+	homeSvc, err := homealerts.New(s.DB(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := api.NewRouterWithHome(s, resolver, dispatcher, authSvc, homeSvc)
 
 	// Create an admin user and generate an API token for testing.
 	hash, err := auth.HashPassword("testpass123")
@@ -58,6 +63,67 @@ func newE2ERouter(t *testing.T) (http.Handler, *sqlite.SQLiteStore, string) {
 	}
 
 	return router, s, rawToken
+}
+
+func TestHomeEventsAPI(t *testing.T) {
+	router, _, token := newE2ERouter(t)
+	do := func(method, path, body string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		var response map[string]any
+		if rr.Body.Len() > 0 {
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return rr.Code, response
+	}
+	code, result := do("POST", "/api/v1/events", `{"event_id":"event-1","event":"start","incident_key":"door","severity":"high","summary":"Door open"}`)
+	if code != 201 || result["status"] != "applied" {
+		t.Fatalf("start: %d %+v", code, result)
+	}
+	alertID, ok := result["alert_id"].(string)
+	if !ok || alertID == "" {
+		t.Fatalf("no alert ID: %+v", result)
+	}
+	code, result = do("POST", "/api/v1/events", `{"event_id":"event-1","event":"start","incident_key":"door","severity":"high","summary":"Door open"}`)
+	if code != 200 || result["status"] != "already_seen" {
+		t.Fatalf("retry: %d %+v", code, result)
+	}
+	code, result = do("GET", "/api/v1/events/event-1", "")
+	if code != 200 || result["kind"] != "start" {
+		t.Fatalf("detail: %d %+v", code, result)
+	}
+	code, result = do("GET", "/api/v1/alerts/"+alertID, "")
+	if code != 200 || result["status"] != "triggered" {
+		t.Fatalf("canonical alert: %d %+v", code, result)
+	}
+	code, result = do("POST", "/api/v1/events", `{"event_id":"event-2","event":"stop","incident_key":"door"}`)
+	if code != 201 || result["status"] != "applied" {
+		t.Fatalf("stop: %d %+v", code, result)
+	}
+	code, result = do("GET", "/api/v1/alerts/"+alertID, "")
+	if code != 200 || result["status"] != "resolved" {
+		t.Fatalf("resolved alert: %d %+v", code, result)
+	}
+	code, result = do("GET", "/api/v1/alert-events?window=1h", "")
+	if code != 200 || result["total"] != float64(2) {
+		t.Fatalf("combined event feed: %d %+v", code, result)
+	}
+	code, result = do("GET", "/api/v1/home-stats", "")
+	if code != 200 || result["started"] != float64(1) || result["stopped"] != float64(1) {
+		t.Fatalf("stats: %d %+v", code, result)
+	}
+	code, result = do("PUT", "/api/v1/home-plugins/telegram", `{"destination":"1234","secret":"123:abc","enabled":false}`)
+	if code != 200 || result["configured"] != true || result["secret"] != nil {
+		t.Fatalf("plugin configuration: %d %+v", code, result)
+	}
 }
 
 // TestSmoke_FullAlertFlow boots the full router and walks through:

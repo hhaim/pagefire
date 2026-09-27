@@ -45,10 +45,10 @@ func (s *serviceStore) ListByTeam(ctx context.Context, teamID string) ([]store.S
 }
 
 func (s *serviceStore) listServices(ctx context.Context, teamID string) ([]store.Service, error) {
-	query := `SELECT id, name, description, escalation_policy_id, team_id, created_at FROM services`
+	query := `SELECT id, name, description, escalation_policy_id, team_id, created_at FROM services WHERE id != 'home-events'`
 	var args []any
 	if teamID != "" {
-		query += ` WHERE team_id = ?`
+		query += ` AND team_id = ?`
 		args = append(args, teamID)
 	}
 	query += ` ORDER BY name`
@@ -71,6 +71,9 @@ func (s *serviceStore) listServices(ctx context.Context, teamID string) ([]store
 }
 
 func (s *serviceStore) Update(ctx context.Context, svc *store.Service) error {
+	if svc.ID == "home-events" {
+		return store.ErrConflict
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE services SET name = ?, description = ?, escalation_policy_id = ?, team_id = ? WHERE id = ?`,
 		svc.Name, svc.Description, svc.EscalationPolicyID, svc.TeamID, svc.ID,
@@ -86,6 +89,9 @@ func (s *serviceStore) Update(ctx context.Context, svc *store.Service) error {
 }
 
 func (s *serviceStore) Delete(ctx context.Context, id string) error {
+	if id == "home-events" {
+		return store.ErrConflict
+	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM services WHERE id = ?`, id)
 	if err != nil {
 		return err

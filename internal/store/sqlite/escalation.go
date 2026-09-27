@@ -43,10 +43,10 @@ func (s *escalationPolicyStore) ListByTeam(ctx context.Context, teamID string) (
 }
 
 func (s *escalationPolicyStore) listPolicies(ctx context.Context, teamID string) ([]store.EscalationPolicy, error) {
-	query := `SELECT id, name, description, repeat, team_id, created_at FROM escalation_policies`
+	query := `SELECT id, name, description, repeat, team_id, created_at FROM escalation_policies WHERE id != 'home-events-policy'`
 	var args []any
 	if teamID != "" {
-		query += ` WHERE team_id = ?`
+		query += ` AND team_id = ?`
 		args = append(args, teamID)
 	}
 	query += ` ORDER BY name`
@@ -69,6 +69,9 @@ func (s *escalationPolicyStore) listPolicies(ctx context.Context, teamID string)
 }
 
 func (s *escalationPolicyStore) Update(ctx context.Context, ep *store.EscalationPolicy) error {
+	if ep.ID == "home-events-policy" {
+		return store.ErrConflict
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE escalation_policies SET name = ?, description = ?, repeat = ?, team_id = ? WHERE id = ?`,
 		ep.Name, ep.Description, ep.Repeat, ep.TeamID, ep.ID,
@@ -84,6 +87,9 @@ func (s *escalationPolicyStore) Update(ctx context.Context, ep *store.Escalation
 }
 
 func (s *escalationPolicyStore) Delete(ctx context.Context, id string) error {
+	if id == "home-events-policy" {
+		return store.ErrConflict
+	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM escalation_policies WHERE id = ?`, id)
 	if err != nil {
 		return err

@@ -2,13 +2,12 @@ import { useRouter } from 'preact-router'
 import { useAuth } from '../auth.jsx'
 
 const NAV_ITEMS = [
-  { path: '/', label: 'Dashboard', icon: '📊', exact: true },
   { path: '/alerts', label: 'Alerts', icon: '⚡' },
-  { path: '/incidents', label: 'Incidents', icon: '🚨' },
+  { path: '/home-events', label: 'Event Playground', icon: '🧪' },
+  { path: '/event-ingestion', label: 'Event Ingestion', icon: '🔑' },
+  { path: '/home-plugins', label: 'Notification Plugins', icon: '🔌' },
   { path: '/services', label: 'Services', icon: '⚙️' },
   { path: '/escalation-policies', label: 'Escalation Policies', icon: '📋' },
-  { path: '/schedules', label: 'Schedules', icon: '📅' },
-  { path: '/teams', label: 'Teams', icon: '👥' },
   { path: '/users', label: 'Users', icon: '👤' },
 ]
 
@@ -28,7 +27,7 @@ export function Layout({ children }) {
             <a
               key={item.path}
               href={item.path}
-              class={`nav-item ${(item.exact ? currentPath === item.path : currentPath.startsWith(item.path)) ? 'active' : ''}`}
+              class={`nav-item ${(currentPath === '/' && item.path === '/alerts' || (item.exact ? currentPath === item.path : currentPath.startsWith(item.path))) ? 'active' : ''}`}
             >
               <span class="nav-icon">{item.icon}</span>
               {item.label}

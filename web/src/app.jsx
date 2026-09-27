@@ -17,7 +17,9 @@ import { Profile } from './pages/profile.jsx'
 import { InviteAccept } from './pages/invite.jsx'
 import { Teams } from './pages/teams.jsx'
 import { TeamDetail } from './pages/team-detail.jsx'
-import { Dashboard } from './pages/dashboard.jsx'
+import { HomeEventPlayground } from './pages/home-event-playground.jsx'
+import { HomePlugins } from './pages/home-plugins.jsx'
+import { EventIngestion } from './pages/event-ingestion.jsx'
 
 export function App() {
   // Invite page is public (no auth required)
@@ -33,7 +35,7 @@ export function App() {
         <ToastProvider>
         <Layout>
           <Router>
-            <Dashboard path="/" />
+            <Alerts path="/" />
             <Alerts path="/alerts" />
             <AlertDetail path="/alerts/:id" />
             <Services path="/services" />
@@ -48,6 +50,9 @@ export function App() {
             <Incidents path="/incidents" />
             <IncidentDetail path="/incidents/:id" />
             <Profile path="/profile" />
+            <HomeEventPlayground path="/home-events" />
+            <HomePlugins path="/home-plugins" />
+            <EventIngestion path="/event-ingestion" />
           </Router>
         </Layout>
         </ToastProvider>

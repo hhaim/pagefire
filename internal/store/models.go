@@ -64,18 +64,18 @@ type TeamMember struct {
 
 // User represents a platform user.
 type User struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Email          string    `json:"email"`
-	Role           string    `json:"role"`
-	Timezone       string    `json:"timezone"`
-	AvatarURL      string    `json:"avatar_url,omitempty"`
-	PasswordHash   string    `json:"-"`
-	AuthProvider   *string   `json:"auth_provider,omitempty"`
-	AuthProviderID *string   `json:"-"`
-	IsActive       bool      `json:"is_active"`
+	ID             string     `json:"id"`
+	Name           string     `json:"name"`
+	Email          string     `json:"email"`
+	Role           string     `json:"role"`
+	Timezone       string     `json:"timezone"`
+	AvatarURL      string     `json:"avatar_url,omitempty"`
+	PasswordHash   string     `json:"-"`
+	AuthProvider   *string    `json:"auth_provider,omitempty"`
+	AuthProviderID *string    `json:"-"`
+	IsActive       bool       `json:"is_active"`
 	LastLogin      *time.Time `json:"last_login,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // UserRole constants.
@@ -86,12 +86,12 @@ const (
 
 // InviteToken represents a one-time token for a new user to set their password.
 type InviteToken struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	TokenHash string    `json:"-"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        string     `json:"id"`
+	UserID    string     `json:"user_id"`
+	TokenHash string     `json:"-"`
+	ExpiresAt time.Time  `json:"expires_at"`
 	UsedAt    *time.Time `json:"used_at,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // APIToken represents a long-lived token for programmatic API access.
@@ -215,6 +215,7 @@ type Alert struct {
 	ID                       string     `json:"id"`
 	ServiceID                string     `json:"service_id"`
 	Status                   string     `json:"status"`
+	Severity                 string     `json:"severity"`
 	Summary                  string     `json:"summary"`
 	Details                  string     `json:"details,omitempty"`
 	Source                   string     `json:"source"` // "api", "integration", "monitor"
@@ -327,7 +328,7 @@ type RoutingRule struct {
 	ID                 string    `json:"id"`
 	ServiceID          string    `json:"service_id"`
 	Priority           int       `json:"priority"`
-	ConditionField     string    `json:"condition_field"`     // "summary", "details", "source"
+	ConditionField     string    `json:"condition_field"`      // "summary", "details", "source"
 	ConditionMatchType string    `json:"condition_match_type"` // "contains", "regex"
 	ConditionValue     string    `json:"condition_value"`
 	EscalationPolicyID string    `json:"escalation_policy_id"`

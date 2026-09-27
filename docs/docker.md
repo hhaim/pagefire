@@ -3,12 +3,11 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/pagefire/pagefire.git
-cd pagefire
-docker compose up -d
+cd pagefire-home
+docker compose up -d --build
 ```
 
-Open **http://localhost:3000**. On first launch you will see a setup wizard to create your admin account.
+Open **http://localhost:3001**. On first launch you will see a setup wizard to create your admin account. The container still listens on port 3000 internally.
 
 To use the pre-built image instead of building locally, edit `docker-compose.yml` and replace the `build: .` line with:
 

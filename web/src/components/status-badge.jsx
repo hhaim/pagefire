@@ -8,6 +8,9 @@ const STATUS_COLORS = {
   critical: 'badge-red',
   major: 'badge-orange',
   minor: 'badge-yellow',
+  high: 'badge-red',
+  mid: 'badge-orange',
+  low: 'badge-blue',
 }
 
 export function StatusBadge({ status }) {

@@ -4,7 +4,7 @@ services:
     # Or use a pre-built image:
     # image: ghcr.io/pagefire/pagefire:latest
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - pagefire-data:/data
     environment:

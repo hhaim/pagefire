@@ -15,6 +15,7 @@ import (
 	"github.com/pagefire/pagefire/internal/api"
 	"github.com/pagefire/pagefire/internal/auth"
 	"github.com/pagefire/pagefire/internal/engine"
+	"github.com/pagefire/pagefire/internal/homealerts"
 	"github.com/pagefire/pagefire/internal/notification"
 	"github.com/pagefire/pagefire/internal/notification/providers"
 	"github.com/pagefire/pagefire/internal/oncall"
@@ -29,6 +30,7 @@ type App struct {
 	Store      store.Store
 	Engine     *engine.Engine
 	Dispatcher *notification.Dispatcher
+	HomeAlerts *homealerts.Service
 	Server     *http.Server
 }
 
@@ -47,6 +49,13 @@ func New(cfg *Config) (*App, error) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
 	// Open store
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = "."
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("creating data directory: %w", err)
+	}
 	var s store.Store
 	var sqliteStore *sqlite.SQLiteStore
 	var err error
@@ -66,6 +75,10 @@ func New(cfg *Config) (*App, error) {
 	// Run migrations
 	if err := s.Migrate(context.Background()); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
+	}
+	homeSvc, err := homealerts.New(sqliteStore.DB(), dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("home alerts: %w", err)
 	}
 
 	// Auth service
@@ -95,6 +108,7 @@ func New(cfg *Config) (*App, error) {
 		engine.NewEscalationProcessor(s.Alerts(), s.Notifications(), s.Users(), resolver),
 		engine.NewNotificationProcessor(s.Notifications(), s.Users(), dispatcher),
 		engine.NewCleanupProcessor(s),
+		homeSvc,
 	)
 
 	// Embedded frontend assets
@@ -104,7 +118,7 @@ func New(cfg *Config) (*App, error) {
 	}
 
 	// HTTP server
-	router := api.NewRouter(s, resolver, dispatcher, authSvc, frontendAssets)
+	router := api.NewRouterWithHome(s, resolver, dispatcher, authSvc, homeSvc, frontendAssets)
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      router,
@@ -118,6 +132,7 @@ func New(cfg *Config) (*App, error) {
 		Store:      s,
 		Engine:     eng,
 		Dispatcher: dispatcher,
+		HomeAlerts: homeSvc,
 		Server:     srv,
 	}, nil
 }

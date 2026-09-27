@@ -158,6 +158,16 @@ func (h *AlertHandler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AlertHandler) acknowledge(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	alert, err := h.alerts.Get(r.Context(), id)
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	if alert.Source == "home" {
+		writeError(w, http.StatusConflict, "home alert acknowledgement comes from Pushover or Telegram")
+		return
+	}
 	var req struct {
 		UserID string `json:"user_id"`
 	}
@@ -175,7 +185,6 @@ func (h *AlertHandler) acknowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
 	if err := h.alerts.Acknowledge(r.Context(), id, userID); err != nil {
 		handleStoreError(w, err)
 		return
@@ -193,6 +202,15 @@ func (h *AlertHandler) acknowledge(w http.ResponseWriter, r *http.Request) {
 
 func (h *AlertHandler) resolve(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	alert, err := h.alerts.Get(r.Context(), id)
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	if alert.Source == "home" {
+		writeError(w, http.StatusConflict, "resolve a home alert by sending a stop event")
+		return
+	}
 	if err := h.alerts.Resolve(r.Context(), id); err != nil {
 		handleStoreError(w, err)
 		return

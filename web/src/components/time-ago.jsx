@@ -7,9 +7,8 @@ const UNITS = [
   { label: 's', seconds: 1 },
 ]
 
-function formatAbsolute(time) {
-  const d = new Date(time)
-  return d.toLocaleString(undefined, {
+function formatAbsolute(date) {
+  return date.toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
@@ -18,8 +17,10 @@ function formatAbsolute(time) {
 export function TimeAgo({ time }) {
   if (!time) return <span class="time-ago">—</span>
 
-  const seconds = Math.floor((Date.now() - new Date(time).getTime()) / 1000)
-  const abs = formatAbsolute(time)
+  const date = new Date(typeof time === 'number' && time < 1e12 ? time * 1000 : time)
+  if (Number.isNaN(date.getTime())) return <span class="time-ago">—</span>
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  const abs = formatAbsolute(date)
 
   if (seconds < 5) return <span class="time-ago" title={abs}>just now</span>
 

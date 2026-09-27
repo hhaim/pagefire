@@ -18,22 +18,22 @@ export async function apiFetch(path, options = {}) {
     if (res.status === 401) {
       // Session expired or not authenticated — trigger re-render
       window.dispatchEvent(new Event('pagefire:unauthorized'))
-      return { data: null, error: 'unauthorized' }
+      return { data: null, error: 'unauthorized', status: res.status }
     }
 
     if (res.status === 204) {
-      return { data: null, error: null }
+      return { data: null, error: null, status: res.status }
     }
 
     const data = await res.json()
 
     if (res.ok) {
-      return { data, error: null }
+      return { data, error: null, status: res.status }
     }
 
-    return { data: null, error: data.error || `HTTP ${res.status}` }
+    return { data: null, error: data.error || `HTTP ${res.status}`, status: res.status }
   } catch (err) {
-    return { data: null, error: err.message }
+    return { data: null, error: err.message, status: null }
   }
 }
 

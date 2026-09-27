@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pagefire/pagefire/internal/auth"
+	"github.com/pagefire/pagefire/internal/homealerts"
 	"github.com/pagefire/pagefire/internal/store"
 )
 
@@ -57,6 +58,37 @@ func SessionOrTokenAuth(authSvc *auth.Service) func(http.Handler) http.Handler {
 			}
 
 			writeError(w, http.StatusUnauthorized, "authentication required")
+		})
+	}
+}
+
+// EventIngestionAuth accepts the event-only key as well as the normal session or API token.
+func EventIngestionAuth(authSvc *auth.Service, home *homealerts.Service, users store.UserStore) func(http.Handler) http.Handler {
+	regular := SessionOrTokenAuth(authSvc)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if authSvc.CurrentUser(r.Context()) != nil {
+				regular(next).ServeHTTP(w, r)
+				return
+			}
+			const bearer = "Bearer "
+			header := r.Header.Get("Authorization")
+			if !strings.HasPrefix(header, bearer+"pfe_") {
+				regular(next).ServeHTTP(w, r)
+				return
+			}
+			ownerID, err := home.ValidateIngestionKey(r.Context(), strings.TrimPrefix(header, bearer))
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "invalid ingestion key")
+				return
+			}
+			user, err := users.Get(r.Context(), ownerID)
+			if err != nil || !user.IsActive {
+				writeError(w, http.StatusUnauthorized, "ingestion key owner unavailable")
+				return
+			}
+			ctx := context.WithValue(r.Context(), userContextKey, user)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

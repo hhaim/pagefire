@@ -20,7 +20,7 @@ func (s *SQLiteStore) PurgeResolvedAlerts(ctx context.Context, olderThan time.Ti
 	// Delete notification_queue records referencing alerts that will be purged.
 	_, err = tx.ExecContext(ctx,
 		`DELETE FROM notification_queue WHERE alert_id IN (
-			SELECT id FROM alerts WHERE status = 'resolved' AND resolved_at < ?
+			SELECT id FROM alerts WHERE status = 'resolved' AND resolved_at < ? AND source != 'home'
 		)`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("purge notifications for old alerts: %w", err)
@@ -29,7 +29,7 @@ func (s *SQLiteStore) PurgeResolvedAlerts(ctx context.Context, olderThan time.Ti
 	// Delete alert_logs for alerts that will be purged.
 	_, err = tx.ExecContext(ctx,
 		`DELETE FROM alert_logs WHERE alert_id IN (
-			SELECT id FROM alerts WHERE status = 'resolved' AND resolved_at < ?
+			SELECT id FROM alerts WHERE status = 'resolved' AND resolved_at < ? AND source != 'home'
 		)`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("purge alert_logs for old alerts: %w", err)
@@ -37,7 +37,7 @@ func (s *SQLiteStore) PurgeResolvedAlerts(ctx context.Context, olderThan time.Ti
 
 	// Delete the alerts themselves.
 	res, err := tx.ExecContext(ctx,
-		`DELETE FROM alerts WHERE status = 'resolved' AND resolved_at < ?`, cutoff)
+		`DELETE FROM alerts WHERE status = 'resolved' AND resolved_at < ? AND source != 'home'`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("purge resolved alerts: %w", err)
 	}

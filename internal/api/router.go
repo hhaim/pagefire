@@ -10,12 +10,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/pagefire/pagefire/internal/auth"
+	"github.com/pagefire/pagefire/internal/homealerts"
 	"github.com/pagefire/pagefire/internal/notification"
 	"github.com/pagefire/pagefire/internal/oncall"
 	"github.com/pagefire/pagefire/internal/store"
 )
 
 func NewRouter(s store.Store, resolver *oncall.Resolver, dispatcher *notification.Dispatcher, authSvc *auth.Service, frontendFS ...fs.FS) http.Handler {
+	return NewRouterWithHome(s, resolver, dispatcher, authSvc, nil, frontendFS...)
+}
+
+func NewRouterWithHome(s store.Store, resolver *oncall.Resolver, dispatcher *notification.Dispatcher, authSvc *auth.Service, home *homealerts.Service, frontendFS ...fs.FS) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -54,6 +59,10 @@ func NewRouter(s store.Store, resolver *oncall.Resolver, dispatcher *notificatio
 		r.Use(RateLimitMiddleware(integrationLimiter))
 		r.Mount("/api/v1/integrations", NewIntegrationHandler(s.Services(), s.Alerts(), s.EscalationPolicies()).Routes())
 	})
+	if home != nil {
+		h := NewHomeAlertHandler(home)
+		r.With(RateLimitMiddleware(integrationLimiter), EventIngestionAuth(authSvc, home, s.Users())).Post("/api/v1/events", h.CreateEvent)
+	}
 
 	// Authenticated API routes
 	apiLimiter := NewRateLimiter(1000, time.Minute)
@@ -79,6 +88,23 @@ func NewRouter(s store.Store, resolver *oncall.Resolver, dispatcher *notificatio
 			r.Mount("/incidents", NewIncidentHandler(s.Incidents()).Routes())
 			r.Mount("/oncall", NewOnCallHandler(resolver).Routes())
 			r.Mount("/schedule-overrides", scheduleHandler.OverrideRoutes())
+			if home != nil {
+				h := NewHomeAlertHandler(home)
+				r.Get("/events", h.ListEvents)
+				r.Get("/alert-events", h.Feed)
+				r.Get("/events/{eventID}", h.GetEvent)
+				r.Get("/home-stats", h.Stats)
+				r.Group(func(r chi.Router) {
+					r.Use(RequireAdminForWrites)
+					r.Get("/event-ingestion-key", h.GetIngestionKey)
+					r.Post("/event-ingestion-key", h.RotateIngestionKey)
+					r.Delete("/event-ingestion-key", h.RevokeIngestionKey)
+					r.Get("/home-plugins", h.Plugins)
+					r.Put("/home-plugins/{kind}", h.PutPlugin)
+					r.Delete("/home-plugins/{kind}", h.DeletePlugin)
+					r.Post("/home-plugins/{kind}/test", h.TestPlugin)
+				})
+			}
 		})
 	})
 

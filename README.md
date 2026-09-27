@@ -26,6 +26,7 @@ PageFire replaces PagerDuty, Grafana OnCall, and OneUptime with a single Go bina
 - **User invite flow** — admins invite by email, users set their own passwords
 - **RBAC** — admin and member roles enforced across UI and API
 - **Built-in web UI** — manage everything from the browser, no separate frontend to deploy
+- **Home alerts** — `start`/`stop`/`info` event API, Telegram and Pushover plugins, and an event playground
 
 ## Quick Start
 
@@ -133,6 +134,7 @@ No authentication header required — the integration key in the URL is the cred
 | [TLS & reverse proxy](docs/tls-reverse-proxy.md) | HTTPS with Nginx, Caddy, or Traefik |
 | [Migrating from Grafana OnCall](docs/migrating-from-grafana-oncall.md) | Concept mapping and step-by-step migration |
 | [OpenAPI spec](docs/openapi.yaml) | Full API specification |
+| [Home alerts](docs/home-alerts.md) | Event API, notification plugins, event playground, and weekly reports |
 
 ## API
 

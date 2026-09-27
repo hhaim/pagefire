@@ -76,11 +76,11 @@ func (s *alertStore) Get(ctx context.Context, id string) (*store.Alert, error) {
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, service_id, status, summary, details, source, dedup_key, group_key,
 		        escalation_policy_snapshot, escalation_step, loop_count,
-		        next_escalation_at, acknowledged_by, acknowledged_at, resolved_at, created_at
+		        next_escalation_at, acknowledged_by, acknowledged_at, resolved_at, created_at, severity
 		 FROM alerts WHERE id = ?`, id,
 	).Scan(&a.ID, &a.ServiceID, &a.Status, &a.Summary, &a.Details, &a.Source,
 		&a.DeduplicationKey, &a.GroupKey, &a.EscalationPolicySnapshot, &a.EscalationStep, &a.LoopCount,
-		&a.NextEscalationAt, &a.AcknowledgedBy, &a.AcknowledgedAt, &a.ResolvedAt, &a.CreatedAt,
+		&a.NextEscalationAt, &a.AcknowledgedBy, &a.AcknowledgedAt, &a.ResolvedAt, &a.CreatedAt, &a.Severity,
 	)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
@@ -91,7 +91,7 @@ func (s *alertStore) Get(ctx context.Context, id string) (*store.Alert, error) {
 func (s *alertStore) List(ctx context.Context, filter store.AlertFilter) ([]store.Alert, error) {
 	query := `SELECT id, service_id, status, summary, details, source, dedup_key, group_key,
 	                 escalation_policy_snapshot, escalation_step, loop_count,
-	                 next_escalation_at, acknowledged_by, acknowledged_at, resolved_at, created_at
+	                 next_escalation_at, acknowledged_by, acknowledged_at, resolved_at, created_at, severity
 	          FROM alerts WHERE 1=1`
 	var args []any
 
@@ -147,7 +147,7 @@ func (s *alertStore) List(ctx context.Context, filter store.AlertFilter) ([]stor
 		var a store.Alert
 		if err := rows.Scan(&a.ID, &a.ServiceID, &a.Status, &a.Summary, &a.Details, &a.Source,
 			&a.DeduplicationKey, &a.GroupKey, &a.EscalationPolicySnapshot, &a.EscalationStep, &a.LoopCount,
-			&a.NextEscalationAt, &a.AcknowledgedBy, &a.AcknowledgedAt, &a.ResolvedAt, &a.CreatedAt,
+			&a.NextEscalationAt, &a.AcknowledgedBy, &a.AcknowledgedAt, &a.ResolvedAt, &a.CreatedAt, &a.Severity,
 		); err != nil {
 			return nil, err
 		}
@@ -206,7 +206,7 @@ func (s *alertStore) FindPendingEscalations(ctx context.Context, before time.Tim
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, service_id, status, summary, details, source, dedup_key, group_key,
 		        escalation_policy_snapshot, escalation_step, loop_count,
-		        next_escalation_at, acknowledged_by, acknowledged_at, resolved_at, created_at
+		        next_escalation_at, acknowledged_by, acknowledged_at, resolved_at, created_at, severity
 		 FROM alerts
 		 WHERE status = ? AND next_escalation_at IS NOT NULL AND next_escalation_at <= ?`,
 		store.AlertStatusTriggered, before.UTC(),
@@ -221,7 +221,7 @@ func (s *alertStore) FindPendingEscalations(ctx context.Context, before time.Tim
 		var a store.Alert
 		if err := rows.Scan(&a.ID, &a.ServiceID, &a.Status, &a.Summary, &a.Details, &a.Source,
 			&a.DeduplicationKey, &a.GroupKey, &a.EscalationPolicySnapshot, &a.EscalationStep, &a.LoopCount,
-			&a.NextEscalationAt, &a.AcknowledgedBy, &a.AcknowledgedAt, &a.ResolvedAt, &a.CreatedAt,
+			&a.NextEscalationAt, &a.AcknowledgedBy, &a.AcknowledgedAt, &a.ResolvedAt, &a.CreatedAt, &a.Severity,
 		); err != nil {
 			return nil, err
 		}

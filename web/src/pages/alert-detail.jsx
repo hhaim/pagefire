@@ -38,12 +38,13 @@ export function AlertDetail({ id }) {
           <h1>{alert.summary}</h1>
         </div>
         <div class="actions">
-          {alert.status === 'triggered' && (
+          {alert.source === 'home' && alert.status !== 'resolved' && <a class="btn btn-success" href={`/home-events?event=stop&alert_id=${encodeURIComponent(alert.id)}`}>Prepare stop event</a>}
+          {alert.source !== 'home' && alert.status === 'triggered' && (
             <button class="btn btn-warning" onClick={() => handleAction('acknowledge')} disabled={acting}>
               Acknowledge
             </button>
           )}
-          {alert.status !== 'resolved' && (
+          {alert.source !== 'home' && alert.status !== 'resolved' && (
             <button class="btn btn-success" onClick={() => handleAction('resolve')} disabled={acting}>
               Resolve
             </button>
@@ -64,11 +65,11 @@ export function AlertDetail({ id }) {
             <span class="detail-label">Source</span>
             <span>{alert.source}</span>
           </div>
-          <div class="detail-row">
+          {alert.source !== 'home' && <div class="detail-row">
             <span class="detail-label">Service</span>
             <span>{(services || []).find(s => s.id === alert.service_id)?.name || alert.service_id}</span>
-          </div>
-          {alert.dedup_key && (
+          </div>}
+          {alert.source !== 'home' && alert.dedup_key && (
             <div class="detail-row">
               <span class="detail-label">Dedup Key</span>
               <span class="mono">{alert.dedup_key}</span>
