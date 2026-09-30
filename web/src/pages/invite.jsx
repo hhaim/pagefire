@@ -27,7 +27,6 @@ export function InviteAccept({ token }) {
   const handleSubmit = async () => {
     const errs = {}
     if (!password) errs.password = 'Password is required'
-    else if (password.length < 8) errs.password = 'Must be at least 8 characters'
     if (password !== confirm) errs.confirm = 'Passwords do not match'
     setFormErrors(errs)
     if (Object.keys(errs).length > 0) return
@@ -85,7 +84,7 @@ export function InviteAccept({ token }) {
             type="password"
             value={password}
             onInput={(e) => setPassword(e.target.value)}
-            placeholder="Min 8 characters"
+            placeholder="Password"
           />
           {formErrors.password && <span class="form-error">{formErrors.password}</span>}
         </div>

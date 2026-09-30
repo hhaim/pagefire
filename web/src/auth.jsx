@@ -150,7 +150,6 @@ function SetupForm() {
     if (!email.trim()) { setError('Email is required'); return }
     if (!validateEmail(email.trim())) { setError('Invalid email address'); return }
     if (!password) { setError('Password is required'); return }
-    if (password.length < 8) { setError('Password must be at least 8 characters'); return }
     if (password !== confirm) { setError('Passwords do not match'); return }
 
     setLoading(true)
@@ -194,7 +193,7 @@ function SetupForm() {
         <input
           type="password"
           class="login-input"
-          placeholder="Password (min 8 characters)"
+          placeholder="Password"
           value={password}
           onInput={(e) => setPassword(e.target.value)}
         />

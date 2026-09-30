@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'preact/hooks'
-import { apiGet } from '../api.js'
+import { apiGet, apiPost } from '../api.js'
 import { TimeAgo } from '../components/time-ago.jsx'
 
 const WINDOWS = [['1h', '1 hour'], ['1d', '1 day'], ['1w', '1 week'], ['1m', '1 month']]
@@ -21,6 +21,9 @@ export function Alerts() {
   const [page, setPage] = useState(0)
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
+  const [activeAlerts, setActiveAlerts] = useState([])
+  const [activeError, setActiveError] = useState('')
+  const [closingAlert, setClosingAlert] = useState('')
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [eventDetail, setEventDetail] = useState(null)
@@ -46,6 +49,17 @@ export function Alerts() {
     setLoading(false)
   }, [windowSize, type, eventClass, source, client, open, appliedRegex, page])
   useEffect(() => { fetchEvents() }, [fetchEvents])
+
+  const fetchActiveAlerts = useCallback(async () => {
+    const response = await apiGet('/home-alerts/active')
+    if (response.data) {
+      setActiveAlerts(response.data)
+      setActiveError('')
+    } else {
+      setActiveError(response.error || 'Could not load open alerts')
+    }
+  }, [])
+  useEffect(() => { fetchActiveAlerts() }, [fetchActiveAlerts])
 
   useEffect(() => {
     setEventDetail(null)
@@ -74,6 +88,15 @@ export function Alerts() {
     setRegex('')
   }
 
+  async function forceClose(alert) {
+    if (!window.confirm(`Force close “${alert.summary || alert.incident_key}”? This records a stop and sends the normal all-clear notification.`)) return
+    setClosingAlert(alert.id)
+    const response = await apiPost(`/home-alerts/${encodeURIComponent(alert.id)}/close`, {})
+    await Promise.all([fetchActiveAlerts(), fetchEvents()])
+    if (response.error) setActiveError(response.error)
+    setClosingAlert('')
+  }
+
   return <div class="page">
     <div class="page-header"><h1>Home Events</h1></div>
     <div class="stat-cards">
@@ -82,6 +105,20 @@ export function Alerts() {
       <div class="stat-card stat-card-red"><div class="stat-value">{totals.error}</div><div class="stat-label">Critical events</div></div>
       <div class="stat-card stat-card-yellow"><div class="stat-value">{totals.warning}</div><div class="stat-label">Warnings</div></div>
     </div>
+    <section class="detail-card">
+      <div class="card-header-row"><h3>Open alerts · start received, no stop</h3><span class="text-muted">{activeAlerts.length} active</span></div>
+      {activeError && <p class="form-error">{activeError}</p>}
+      {activeAlerts.length === 0 ? <p class="text-muted">No open alerts.</p> : <div class="event-table-wrap"><table class="data-table">
+        <thead><tr><th>Started</th><th>Severity</th><th>Issue</th><th>Incident key</th><th>Action</th></tr></thead>
+        <tbody>{activeAlerts.map(alert => <tr key={alert.id}>
+          <td title={eventTime(alert.started_at)}><TimeAgo time={alert.started_at} /></td>
+          <td>{alert.severity}</td>
+          <td class="summary-cell"><strong>{alert.summary || alert.incident_key}</strong>{alert.details && <div class="text-muted event-preview">{alert.details}</div>}</td>
+          <td>{alert.incident_key}</td>
+          <td><button class="btn btn-danger btn-sm" disabled={closingAlert === alert.id} onClick={() => forceClose(alert)}>{closingAlert === alert.id ? 'Closing…' : 'Force close'}</button></td>
+        </tr>)}</tbody>
+      </table></div>}
+    </section>
     <section class="detail-card event-filters">
       <div class="event-filter-grid">
         <label>Window

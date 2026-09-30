@@ -179,6 +179,31 @@ func TestHomeAlertLifecycleAndDelivery(t *testing.T) {
 	}
 }
 
+func TestForceCloseCreatesStopEvent(t *testing.T) {
+	ctx := context.Background()
+	svc, db, _ := newTestService(t)
+	start, err := svc.Process(ctx, "source-1", EventRequest{EventID: "start-open", IncidentKey: "water", Event: "start", Severity: "low", Summary: "Water leak"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := svc.ForceClose(ctx, "source-1", start.AlertID)
+	if err != nil || closed.Status != "applied" {
+		t.Fatalf("force close: %+v, %v", closed, err)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM home_alerts WHERE id=?`, start.AlertID).Scan(&status); err != nil || status != "stopped" {
+		t.Fatalf("forced alert status=%q, err=%v", status, err)
+	}
+	stopEvent, err := svc.GetEvent(ctx, "source-1", closed.EventID)
+	if err != nil || stopEvent.Kind != "stop" || stopEvent.AlertID != start.AlertID {
+		t.Fatalf("forced stop event: %+v, %v", stopEvent, err)
+	}
+	var message string
+	if err := db.QueryRowContext(ctx, `SELECT message FROM home_deliveries WHERE event_id=?`, stopEvent.ID).Scan(&message); err != nil || !strings.Contains(message, "DOWN") {
+		t.Fatalf("forced close notification=%q, err=%v", message, err)
+	}
+}
+
 func TestWeeklyReportAndRetention(t *testing.T) {
 	ctx := context.Background()
 	svc, db, _ := newTestService(t)

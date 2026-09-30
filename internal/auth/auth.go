@@ -28,9 +28,12 @@ type Service struct {
 func NewService(users store.UserStore, db *sql.DB) *Service {
 	sm := scs.New()
 	sm.Store = sqlite3store.New(db)
-	sm.Lifetime = 24 * time.Hour
-	sm.IdleTimeout = 2 * time.Hour
+	// Keep sessions effectively permanent. Browsers may cap cookie lifetimes,
+	// but this avoids expiring the server-side session during normal use.
+	sm.Lifetime = 100 * 365 * 24 * time.Hour
+	sm.IdleTimeout = 0
 	sm.Cookie.Name = "pagefire_session"
+	sm.Cookie.Persist = true
 	sm.Cookie.HttpOnly = true
 	sm.Cookie.SameSite = 3  // Lax
 	sm.Cookie.Secure = true // localhost is treated as a secure context by browsers

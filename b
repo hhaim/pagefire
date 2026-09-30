@@ -6,9 +6,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage: ./b --run
+       ./b --kill
        ./b push [tag]
 
   --run       Build and run PageFire with Docker Compose.
+  --kill      Kill the PageFire Docker Compose service.
   push [tag]  Build for linux/amd64 and push to frigate:5001.
 
 Push settings: DOCKER_REGISTRY, PAGEFIRE_REPO, PAGEFIRE_TAG,
@@ -57,6 +59,14 @@ case "${1:-}" in
     fi
     cd "$ROOT"
     docker compose up -d --build pagefire
+    ;;
+  --kill)
+    if (($# != 1)); then
+      usage >&2
+      exit 2
+    fi
+    cd "$ROOT"
+    docker compose kill pagefire
     ;;
   push)
     if (($# > 2)); then

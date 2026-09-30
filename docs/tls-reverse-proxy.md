@@ -2,7 +2,7 @@
 
 PageFire does not terminate TLS itself. In production, place a reverse proxy in front of PageFire to handle HTTPS. This keeps TLS certificate management separate from the application and follows standard deployment practice.
 
-**Why this matters:** PageFire sets `Secure=true` on session cookies, so browsers will only send them over HTTPS. Without TLS in production, login sessions will not persist.
+**Why this matters:** PageFire marks session cookies `Secure` on HTTPS connections, so browsers only send them over HTTPS. Plain HTTP on a private network can still establish a session, but use TLS for deployments exposed beyond a trusted local network.
 
 ## Caddy (simplest option)
 
@@ -96,7 +96,7 @@ sudo certbot renew --dry-run
 
 **X-Forwarded-Proto header:** Make sure your reverse proxy sends `X-Forwarded-Proto: https`. PageFire uses this to generate correct absolute URLs in invite emails and API responses.
 
-**Secure cookies require HTTPS:** Session cookies are set with `Secure=true`. On plain HTTP (except localhost), browsers will refuse to store them, and login will not work. Always terminate TLS in production.
+**Secure cookies require HTTPS:** PageFire detects direct TLS and the `X-Forwarded-Proto` header from a reverse proxy. It marks session cookies `Secure` for HTTPS and leaves that attribute off for plain HTTP, allowing LAN access by IP address. Use HTTPS for production deployments.
 
 **Changing the listen port:** PageFire defaults to port 3000. To change it, set the `PAGEFIRE_PORT` environment variable:
 

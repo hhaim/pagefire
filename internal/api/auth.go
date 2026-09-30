@@ -37,6 +37,62 @@ func SessionAuth(authSvc *auth.Service) func(http.Handler) http.Handler {
 	}
 }
 
+// sessionCookieSecurity adjusts the Secure attribute per request. PageFire is
+// commonly accessed over plain HTTP on a private LAN, where browsers reject a
+// Secure cookie. TLS-terminated deployments are detected through X-Forwarded-Proto.
+func sessionCookieSecurity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secure := r.TLS != nil
+		if !secure {
+			proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+			secure = strings.EqualFold(proto, "https")
+		}
+		next.ServeHTTP(&sessionCookieResponseWriter{ResponseWriter: w, secure: secure}, r)
+	})
+}
+
+type sessionCookieResponseWriter struct {
+	http.ResponseWriter
+	secure bool
+	wrote  bool
+}
+
+func (w *sessionCookieResponseWriter) WriteHeader(status int) {
+	if !w.wrote {
+		w.wrote = true
+		if !w.secure {
+			cookies := w.Header().Values("Set-Cookie")
+			w.Header().Del("Set-Cookie")
+			for _, cookie := range cookies {
+				if !strings.HasPrefix(cookie, "pagefire_session=") {
+					w.Header().Add("Set-Cookie", cookie)
+					continue
+				}
+				parts := strings.Split(cookie, ";")
+				filtered := parts[:1]
+				for _, attribute := range parts[1:] {
+					if !strings.EqualFold(strings.TrimSpace(attribute), "secure") {
+						filtered = append(filtered, attribute)
+					}
+				}
+				w.Header().Add("Set-Cookie", strings.Join(filtered, ";"))
+			}
+		}
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *sessionCookieResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (w *sessionCookieResponseWriter) Write(body []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
 // EventIngestionAuth accepts the event-only key or an authenticated browser session.
 func EventIngestionAuth(authSvc *auth.Service, home *homealerts.Service, users store.UserStore) func(http.Handler) http.Handler {
 	regular := SessionAuth(authSvc)

@@ -96,6 +96,15 @@ func (h *HomeAlertHandler) GetActiveAlert(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, item)
 }
 
+func (h *HomeAlertHandler) ForceCloseAlert(w http.ResponseWriter, r *http.Request) {
+	result, err := h.service.ForceClose(r.Context(), UserFromContext(r.Context()).ID, chi.URLParam(r, "alertID"))
+	if err != nil {
+		homeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *HomeAlertHandler) Feed(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parseListLimit(r)
 	filter := homealerts.FeedFilter{

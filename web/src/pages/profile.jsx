@@ -59,7 +59,6 @@ function PasswordCard({ toast }) {
     const errs = {}
     if (!form.current_password) errs.current_password = 'Required'
     if (!form.new_password) errs.new_password = 'Required'
-    else if (form.new_password.length < 8 || !/[A-Z]/.test(form.new_password) || !/[a-z]/.test(form.new_password) || !/[0-9]/.test(form.new_password)) errs.new_password = 'Min 8 chars, upper + lower + digit'
     if (form.new_password !== form.confirm) errs.confirm = 'Passwords do not match'
     setErrors(errs)
     if (Object.keys(errs).length > 0) return
@@ -94,7 +93,7 @@ function PasswordCard({ toast }) {
         value={form.new_password}
         onInput={(e) => setForm(prev => ({ ...prev, new_password: e.target.value }))}
         error={errors.new_password}
-        placeholder="Min 8 chars, upper + lower + digit"
+        placeholder="New password"
       />
       <TextInput
         label="Confirm New Password"

@@ -355,6 +355,18 @@ func (s *Service) GetActiveAlert(ctx context.Context, source, id string) (Active
 	return item, err
 }
 
+func (s *Service) ForceClose(ctx context.Context, source, alertID string) (EventResult, error) {
+	alert, err := s.GetActiveAlert(ctx, source, alertID)
+	if err != nil {
+		return EventResult{}, err
+	}
+	return s.Process(ctx, source, EventRequest{
+		EventID:     uuid.NewString(),
+		IncidentKey: alert.IncidentKey,
+		Event:       "stop",
+	})
+}
+
 func (s *Service) Acknowledge(ctx context.Context, source, alertID, actor string) error {
 	now := time.Now().UTC().Unix()
 	tx, err := s.db.BeginTx(ctx, nil)

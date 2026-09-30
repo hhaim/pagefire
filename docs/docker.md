@@ -38,6 +38,8 @@ All configuration is done through environment variables with the `PAGEFIRE_` pre
 
 PageFire stores its SQLite database and the `home-alerts.key` plugin encryption key in the `/data` directory inside the container. The `docker-compose.yml` maps this to a named Docker volume (`pagefire-data`), so your data survives container restarts and recreations.
 
+At startup, the container sets the mounted data directory's ownership for PageFire and then runs the server as an unprivileged user. This also prepares a fresh or previously root-owned volume for SQLite migrations.
+
 To use a bind mount instead (useful for backups):
 
 ```yaml
@@ -45,7 +47,7 @@ volumes:
   - ./data:/data
 ```
 
-Make sure the host directory exists and is writable.
+The container prepares the mounted directory for its internal `pagefire` user before starting. With a bind mount, this changes ownership of files under `./data` to that container user so SQLite can write its database and WAL files.
 
 ### Backups
 

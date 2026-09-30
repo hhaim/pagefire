@@ -14,11 +14,14 @@ The sidebar has one **Alerts** entry. The root page and `/alerts` show the same 
 
 The dashboard provides:
 
+- An **Open alerts** list showing every active start without a matching stop, independent of the event-feed time window, with a **Force close** action.
 - Window presets: 1 hour, 1 day, 1 week, 1 month.
 - Type, class, source, client, open (all/true/false), and message regex filters.
 - A stacked event chart by class, counts by event type, and summary cards.
 - Event details, JSON, delivery status, and pagination.
 - Double-click on an open Home Event to open its alert in the playground as a prepared stop event.
+
+Force close records a generated stop event and queues the same all-clear notification as an incoming `stop`. It is available to the signed-in user who owns the alert.
 
 The open count uses distinct alert IDs, so multiple repeat events for one active alert count as one open alert. Home Event timestamps are Unix seconds; the UI converts them to JavaScript milliseconds for relative time display.
 
@@ -80,6 +83,7 @@ Pushover's emergency notification handles provider retries while its receipt is 
 | `GET /api/v1/events` and `GET /api/v1/events/{event_id}` | Recent events and delivery details for the signed-in user. |
 | `GET /api/v1/alert-events` | Filtered Home Events feed used by the dashboard. |
 | `GET /api/v1/home-alerts/active` and `GET /api/v1/home-alerts/{id}` | Active Home Alerts and a stop target for the playground. |
+| `POST /api/v1/home-alerts/{id}/close` | Force close an active alert by recording a stop event. |
 | `GET/POST/DELETE /api/v1/event-ingestion-key` | Key status, create/rotate, revoke. Writes require admin. |
 | `GET/PUT/DELETE /api/v1/home-plugins` | Plugin settings. Writes require admin. |
 | `GET /api/v1/home-stats` | Event and delivery counts. |

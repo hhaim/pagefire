@@ -110,25 +110,22 @@ func TestDecodeJSON_AcceptsJSONContentType(t *testing.T) {
 	}
 }
 
-// ---------- Password Complexity ----------
+// ---------- Password Requirements ----------
 
-func TestValidatePassword_Complexity(t *testing.T) {
+func TestValidatePassword_RequiresValueOnly(t *testing.T) {
 	tests := []struct {
 		name     string
 		password string
 		wantErr  bool
 	}{
-		// Should reject
-		{"all lowercase", "abcdefgh", true},
-		{"all uppercase", "ABCDEFGH", true},
-		{"no digit", "Abcdefgh", true},
-		{"no uppercase", "abcdefg1", true},
-		{"no lowercase", "ABCDEFG1", true},
-		{"too short", "Ab1", true},
+		// Empty passwords are still rejected; no complexity rules apply.
 		{"empty", "", true},
-		{"7 chars valid mix", "Abcdef1", true},
-
-		// Should accept
+		{"short password", "qaz", false},
+		{"all lowercase", "abcdefgh", false},
+		{"all uppercase", "ABCDEFGH", false},
+		{"no digit", "Abcdefgh", false},
+		{"no uppercase", "abcdefg1", false},
+		{"no lowercase", "ABCDEFG1", false},
 		{"valid 8 chars", "Abcdefg1", false},
 		{"valid longer", "MyP@ssw0rd123", false},
 		{"valid with special", "Test!ng1", false},

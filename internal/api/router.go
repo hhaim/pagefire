@@ -24,8 +24,12 @@ func NewRouter(s store.Store, authSvc *auth.Service, home *homealerts.Service, f
 	r.Use(requestLogger)
 	r.Use(chimw.Recoverer)
 
-	// Session middleware (loads/saves session data on every request)
-	r.Use(authSvc.SessionManager().LoadAndSave)
+	// Session middleware (loads/saves session data on every request). Secure
+	// cookies are retained for HTTPS (including TLS terminated by a trusted
+	// reverse proxy), while plain HTTP LAN installs can still establish sessions.
+	r.Use(func(next http.Handler) http.Handler {
+		return sessionCookieSecurity(authSvc.SessionManager().LoadAndSave(next))
+	})
 
 	// Health check (no auth) — includes DB connectivity
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +72,7 @@ func NewRouter(s store.Store, authSvc *auth.Service, home *homealerts.Service, f
 			r.Get("/events/{eventID}", h.GetEvent)
 			r.Get("/home-alerts/active", h.ListActiveAlerts)
 			r.Get("/home-alerts/{alertID}", h.GetActiveAlert)
+			r.Post("/home-alerts/{alertID}/close", h.ForceCloseAlert)
 			r.Get("/home-stats", h.Stats)
 			r.Group(func(r chi.Router) {
 				r.Use(RequireAdminForWrites)

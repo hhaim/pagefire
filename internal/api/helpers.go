@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/pagefire/pagefire/internal/store"
 )
@@ -93,25 +92,10 @@ func validateTimezone(tz string) bool {
 	return err == nil
 }
 
-// validatePassword checks password complexity: min 8 chars, at least one
-// uppercase letter, one lowercase letter, and one digit.
+// validatePassword requires a value but does not enforce complexity rules.
 func validatePassword(password string) error {
-	if len(password) < 8 {
-		return fmt.Errorf("password must be at least 8 characters and contain uppercase, lowercase, and a digit")
-	}
-	var hasUpper, hasLower, hasDigit bool
-	for _, c := range password {
-		switch {
-		case unicode.IsUpper(c):
-			hasUpper = true
-		case unicode.IsLower(c):
-			hasLower = true
-		case unicode.IsDigit(c):
-			hasDigit = true
-		}
-	}
-	if !hasUpper || !hasLower || !hasDigit {
-		return fmt.Errorf("password must be at least 8 characters and contain uppercase, lowercase, and a digit")
+	if password == "" {
+		return fmt.Errorf("password is required")
 	}
 	return nil
 }
