@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'preact/hooks'
 import { apiGet, apiPost } from '../api.js'
 import { TimeAgo } from '../components/time-ago.jsx'
+import { Modal } from '../components/modal.jsx'
 
 const WINDOWS = [['1h', '1 hour'], ['1d', '1 day'], ['1w', '1 week'], ['1m', '1 month']]
 const PAGE_SIZE = 100
@@ -26,6 +27,10 @@ export function Alerts() {
   const [closingAlert, setClosingAlert] = useState('')
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
+  const [selectedAlert, setSelectedAlert] = useState(null)
+  const [alertHistory, setAlertHistory] = useState(null)
+  const [alertHistoryError, setAlertHistoryError] = useState('')
+  const [showAlertHistory, setShowAlertHistory] = useState(false)
   const [eventDetail, setEventDetail] = useState(null)
 
   useEffect(() => {
@@ -97,6 +102,25 @@ export function Alerts() {
     setClosingAlert('')
   }
 
+  async function toggleAlertHistory() {
+    if (showAlertHistory) {
+      setShowAlertHistory(false)
+      return
+    }
+    setShowAlertHistory(true)
+    if (alertHistory || !selectedAlert) return
+    const response = await apiGet(`/home-alerts/${encodeURIComponent(selectedAlert.id)}/events`)
+    setAlertHistory(response.data || [])
+    setAlertHistoryError(response.error || '')
+  }
+
+  function openAlertDetails(alert) {
+    setSelectedAlert(alert)
+    setAlertHistory(null)
+    setAlertHistoryError('')
+    setShowAlertHistory(false)
+  }
+
   return <div class="page">
     <div class="page-header"><h1>Home Events</h1></div>
     <div class="stat-cards">
@@ -113,7 +137,7 @@ export function Alerts() {
         <tbody>{activeAlerts.map(alert => <tr key={alert.id}>
           <td title={eventTime(alert.started_at)}><TimeAgo time={alert.started_at} /></td>
           <td>{alert.severity}</td>
-          <td class="summary-cell"><strong>{alert.summary || alert.incident_key}</strong>{alert.details && <div class="text-muted event-preview">{alert.details}</div>}</td>
+          <td class="summary-cell" onClick={() => { if (window.matchMedia('(pointer: coarse)').matches) openAlertDetails(alert) }} onDblClick={() => openAlertDetails(alert)} title="Double-click for issue details"><strong>{alert.summary || alert.incident_key}</strong>{alert.details && <div class="text-muted event-preview">{alert.details}</div>}</td>
           <td>{alert.incident_key}</td>
           <td><button class="btn btn-danger btn-sm" disabled={closingAlert === alert.id} onClick={() => forceClose(alert)}>{closingAlert === alert.id ? 'Closing…' : 'Force close'}</button></td>
         </tr>)}</tbody>
@@ -217,5 +241,25 @@ export function Alerts() {
       {selected.origin === 'home' && selected.open && selected.alert_id && <a href={`/home-events?event=stop&alert_id=${encodeURIComponent(selected.alert_id)}`}>Prepare stop event</a>}
       <details><summary>Event JSON and deliveries</summary><pre>{JSON.stringify(eventDetail || selected, null, 2)}</pre></details>
     </section>}
+
+    <Modal open={!!selectedAlert} onClose={() => setSelectedAlert(null)} title={selectedAlert?.summary || selectedAlert?.incident_key || 'Issue details'}>
+      {selectedAlert && <div class="issue-popup">
+        <div class="detail-row"><span class="detail-label">Severity</span><strong>{selectedAlert.severity}</strong></div>
+        <div class="detail-row"><span class="detail-label">Incident key</span><code>{selectedAlert.incident_key}</code></div>
+        <div class="detail-row"><span class="detail-label">Started</span><span title={eventTime(selectedAlert.started_at)}><TimeAgo time={selectedAlert.started_at} /> · {eventTime(selectedAlert.started_at)}</span></div>
+        <div class="detail-row"><span class="detail-label">Acknowledged</span><span>{selectedAlert.acknowledged ? 'Yes' : 'No'}</span></div>
+        <div class="detail-row"><span class="detail-label">Alert ID</span><code>{selectedAlert.id}</code></div>
+        {selectedAlert.details && <div class="detail-block"><span class="detail-label">Full details</span><p class="issue-popup-details">{selectedAlert.details}</p></div>}
+        <button class="btn btn-secondary issue-history-button" onClick={toggleAlertHistory} aria-expanded={showAlertHistory}>◷ {showAlertHistory ? 'Hide activity' : 'Activity'}</button>
+        {showAlertHistory && <div class="issue-history">
+          {alertHistoryError && <p class="form-error">{alertHistoryError}</p>}
+          {alertHistory === null ? <p class="text-muted">Loading activity…</p> : alertHistory.length === 0 ? <p class="text-muted">No activity found.</p> : alertHistory.map(event => <article class="issue-history-item" key={event.id}>
+            <div><strong>{event.kind}</strong>{event.severity ? ` · ${event.severity}` : ''} <span class="text-muted">· {eventTime(event.created_at)}</span></div>
+            {event.summary && <div>{event.summary}</div>}
+            {event.details && <p class="text-muted issue-popup-details">{event.details}</p>}
+          </article>)}
+        </div>}
+      </div>}
+    </Modal>
   </div>
 }

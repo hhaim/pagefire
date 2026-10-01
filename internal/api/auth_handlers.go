@@ -117,11 +117,7 @@ func (h *AuthHandler) setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "" || req.Email == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "name, email, and password required")
-		return
-	}
-	if !validateEmail(req.Email) {
-		writeError(w, http.StatusBadRequest, "invalid email address")
+		writeError(w, http.StatusBadRequest, "name, username, and password required")
 		return
 	}
 	if err := validatePassword(req.Password); err != nil {

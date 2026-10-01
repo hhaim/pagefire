@@ -346,6 +346,26 @@ func (s *Service) ListActiveAlerts(ctx context.Context, source string) ([]Active
 	return items, rows.Err()
 }
 
+func (s *Service) AlertEvents(ctx context.Context, source, alertID string) ([]EventDetail, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,client_event_id,kind,severity,summary,details,created_at,incident_key FROM home_events WHERE source=? AND alert_id=? ORDER BY created_at,id`, source, alertID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EventDetail{}
+	for rows.Next() {
+		var event EventDetail
+		var clientID sql.NullString
+		if err := rows.Scan(&event.ID, &clientID, &event.Kind, &event.Severity, &event.Summary, &event.Details, &event.CreatedAt, &event.IncidentKey); err != nil {
+			return nil, err
+		}
+		event.ClientEventID = clientID.String
+		event.AlertID = alertID
+		items = append(items, event)
+	}
+	return items, rows.Err()
+}
+
 func (s *Service) GetActiveAlert(ctx context.Context, source, id string) (ActiveAlert, error) {
 	var item ActiveAlert
 	err := s.db.QueryRowContext(ctx, `SELECT id,incident_key,severity,summary,details,acknowledged_at IS NOT NULL,started_at FROM home_alerts WHERE source=? AND id=? AND status='active'`, source, id).Scan(&item.ID, &item.IncidentKey, &item.Severity, &item.Summary, &item.Details, &item.Acknowledged, &item.StartedAt)

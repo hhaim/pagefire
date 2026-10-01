@@ -3,6 +3,7 @@ import { useAuth } from '../auth.jsx'
 import { apiPut } from '../api.js'
 import { TextInput } from '../components/form-field.jsx'
 import { useToast } from '../components/toast.jsx'
+import { setTheme } from '../theme.js'
 
 export function Profile() {
   const { user } = useAuth()
@@ -14,6 +15,15 @@ export function Profile() {
     <div class="page">
       <div class="page-header">
         <h1>Profile &amp; Settings</h1>
+      </div>
+
+      <div class="detail-card" style="margin-bottom: 18px">
+        <h3>Appearance</h3>
+        <label class="form-label" for="theme-setting">Color theme</label>
+        <select id="theme-setting" class="form-control" value={document.documentElement.dataset.theme || 'light'} onChange={event => setTheme(event.currentTarget.value)}>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
       </div>
 
       <div class="detail-grid">
@@ -34,7 +44,7 @@ function ProfileCard({ user }) {
         <span>{user.name}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Email</span>
+        <span class="detail-label">Username</span>
         <span>{user.email}</span>
       </div>
       <div class="detail-row">

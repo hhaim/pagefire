@@ -7,7 +7,6 @@ import { StatusBadge } from '../components/status-badge.jsx'
 import { Modal } from '../components/modal.jsx'
 import { TextInput, SelectInput } from '../components/form-field.jsx'
 import { ConfirmDialog } from '../components/confirm-dialog.jsx'
-import { CopyButton } from '../components/copy-button.jsx'
 import { useToast } from '../components/toast.jsx'
 
 const TIMEZONES = [
@@ -17,12 +16,7 @@ const TIMEZONES = [
   'Asia/Tokyo', 'Australia/Sydney', 'Pacific/Auckland',
 ].map(tz => ({ value: tz, label: tz }))
 
-const emptyForm = { name: '', email: '', timezone: 'UTC', role: 'user' }
-
-const ROLES = [
-  { value: 'user', label: 'User' },
-  { value: 'admin', label: 'Admin' },
-]
+const emptyForm = { username: '', password: '', timezone: 'UTC' }
 
 export function Users() {
   const { data: users, loading, refetch } = useApi('/users')
@@ -36,19 +30,16 @@ export function Users() {
   const [saving, setSaving] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState(null)
-  const [inviteUrl, setInviteUrl] = useState(null)
-
   const openCreate = () => {
     setEditing(null)
     setForm(emptyForm)
     setErrors({})
-    setInviteUrl(null)
     setModalOpen(true)
   }
 
   const openEdit = (user) => {
     setEditing(user)
-    setForm({ name: user.name, email: user.email, timezone: user.timezone || 'UTC' })
+    setForm({ username: user.email, password: '', timezone: user.timezone || 'UTC' })
     setErrors({})
     setModalOpen(true)
   }
@@ -57,9 +48,8 @@ export function Users() {
 
   const validate = () => {
     const errs = {}
-    if (!form.name.trim()) errs.name = 'Name is required'
-    if (!form.email.trim()) errs.email = 'Email is required'
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = 'Invalid email address'
+    if (!form.username.trim()) errs.username = 'Username is required'
+    if (!editing && !form.password) errs.password = 'Password is required'
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -67,9 +57,11 @@ export function Users() {
   const handleSave = async () => {
     if (!validate()) return
     setSaving(true)
-    const payload = { name: form.name.trim(), email: form.email.trim(), timezone: form.timezone }
+    const username = form.username.trim()
+    const payload = { name: editing?.name || username, email: username, timezone: editing ? form.timezone : 'UTC' }
     if (!editing) {
-      payload.role = form.role
+      payload.role = 'admin'
+      payload.password = form.password
     }
     const { data, error } = editing
       ? await apiPut(`/users/${editing.id}`, payload)
@@ -79,15 +71,9 @@ export function Users() {
       toast.error(error)
       return
     }
-    if (!editing && data?.invite_url) {
-      toast.success('User created — share the invite link')
-      setInviteUrl(data.invite_url)
-      refetch()
-    } else {
-      toast.success(editing ? 'User updated' : 'User created')
-      setModalOpen(false)
-      refetch()
-    }
+    toast.success(editing ? 'User updated' : 'User created')
+    setModalOpen(false)
+    refetch()
   }
 
   const handleDelete = async () => {
@@ -126,7 +112,7 @@ export function Users() {
           <thead>
             <tr>
               <th>Name</th>
-              <th>Email</th>
+              <th>Username</th>
               <th>Role</th>
               <th>Timezone</th>
               <th></th>
@@ -153,37 +139,20 @@ export function Users() {
         </table>
       )}
 
-      <Modal open={modalOpen} onClose={() => { setModalOpen(false); setInviteUrl(null) }} title={inviteUrl ? 'Invite Link' : editing ? 'Edit User' : 'Add User'}>
-        {inviteUrl ? (
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit User' : 'Add User'}>
+        {
           <div>
-            <p class="text-muted" style="margin-bottom: 12px">Share this link with the user. They'll set their own password. The link expires in 7 days.</p>
-            <div class="secret-display-row">
-              <div class="secret-display"><code class="mono" style="word-break: break-all">{inviteUrl}</code></div>
-              <CopyButton text={inviteUrl} />
-            </div>
-            <div class="form-actions">
-              <button class="btn btn-primary" onClick={() => { setModalOpen(false); setInviteUrl(null) }}>Done</button>
-            </div>
-          </div>
-        ) : (
-          <div>
-            <TextInput label="Name" value={form.name} onInput={setField('name')} error={errors.name} placeholder="Jane Doe" />
-            <TextInput label="Email" value={form.email} onInput={setField('email')} error={errors.email} placeholder="jane@example.com" type="email" />
-            {!editing && (
-              <SelectInput label="Role" value={form.role} onChange={setField('role')} options={ROLES} />
-            )}
-            <SelectInput label="Timezone" value={form.timezone} onChange={setField('timezone')} options={TIMEZONES} />
-            {!editing && (
-              <p class="text-muted" style="font-size: 12px; margin-top: 8px">An invite link will be generated. The user will set their own password.</p>
-            )}
+            <TextInput label="Username" value={form.username} onInput={setField('username')} error={errors.username} placeholder="admin" />
+            {!editing && <TextInput label="Password" value={form.password} onInput={setField('password')} error={errors.password} type="password" autoComplete="new-password" />}
+            {editing && <SelectInput label="Timezone" value={form.timezone} onChange={setField('timezone')} options={TIMEZONES} />}
             <div class="form-actions">
               <button class="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
               <button class="btn btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create & Get Invite Link'}
+                {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create Admin'}
               </button>
             </div>
           </div>
-        )}
+        }
       </Modal>
 
       <ConfirmDialog

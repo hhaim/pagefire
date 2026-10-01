@@ -52,6 +52,31 @@ func (h *HomeAlertHandler) RotateIngestionKey(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusCreated, map[string]string{"token": token})
 }
 
+func (h *HomeAlertHandler) RememberIngestionKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON request")
+		return
+	}
+	if err := h.service.RememberIngestionKey(r.Context(), req.Token); err != nil {
+		homeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *HomeAlertHandler) RevealIngestionKey(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	token, err := h.service.RevealIngestionKey(r.Context())
+	if err != nil {
+		homeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}
+
 func (h *HomeAlertHandler) RevokeIngestionKey(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.RevokeIngestionKey(r.Context()); err != nil {
 		handleStoreError(w, err)
@@ -94,6 +119,15 @@ func (h *HomeAlertHandler) GetActiveAlert(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *HomeAlertHandler) ListAlertEvents(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.AlertEvents(r.Context(), UserFromContext(r.Context()).ID, chi.URLParam(r, "alertID"))
+	if err != nil {
+		homeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *HomeAlertHandler) ForceCloseAlert(w http.ResponseWriter, r *http.Request) {

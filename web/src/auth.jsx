@@ -90,7 +90,7 @@ function LoginForm({ login }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!email.trim()) { setError('Email is required'); return }
+    if (!email.trim()) { setError('Username is required'); return }
     if (!password) { setError('Password is required'); return }
 
     setLoading(true)
@@ -110,11 +110,12 @@ function LoginForm({ login }) {
         <div class="login-logo">PageFire</div>
         <p class="login-subtitle">Sign in to your account</p>
         <input
-          type="email"
+          type="text"
           class="login-input"
-          placeholder="Email"
+          placeholder="Username"
           value={email}
           onInput={(e) => setEmail(e.target.value)}
+          autoComplete="username"
           autoFocus
         />
         <input
@@ -123,6 +124,7 @@ function LoginForm({ login }) {
           placeholder="Password"
           value={password}
           onInput={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
         />
         {error && <p class="login-error">{error}</p>}
         <button class="login-button" type="submit" disabled={loading}>
@@ -142,13 +144,10 @@ function SetupForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const validateEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
-
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!name.trim()) { setError('Name is required'); return }
-    if (!email.trim()) { setError('Email is required'); return }
-    if (!validateEmail(email.trim())) { setError('Invalid email address'); return }
+    if (!email.trim()) { setError('Username is required'); return }
     if (!password) { setError('Password is required'); return }
     if (password !== confirm) { setError('Passwords do not match'); return }
 
@@ -184,9 +183,9 @@ function SetupForm() {
           autoFocus
         />
         <input
-          type="email"
+          type="text"
           class="login-input"
-          placeholder="Email"
+          placeholder="Username"
           value={email}
           onInput={(e) => setEmail(e.target.value)}
         />

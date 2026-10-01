@@ -1,12 +1,7 @@
 package api
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pagefire/pagefire/internal/auth"
@@ -44,19 +39,13 @@ func (h *UserHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name == "" || req.Email == "" {
-		writeError(w, http.StatusBadRequest, "name and email are required")
+	if req.Name == "" || req.Email == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "username and password are required")
 		return
 	}
-	if !validateEmail(req.Email) {
-		writeError(w, http.StatusBadRequest, "invalid email address")
+	if err := validatePassword(req.Password); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
-	}
-	if req.Password != "" {
-		if err := validatePassword(req.Password); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
 	}
 
 	role := store.RoleUser
@@ -76,14 +65,10 @@ func (h *UserHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var passwordHash string
-	if req.Password != "" {
-		hash, err := auth.HashPassword(req.Password)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		passwordHash = hash
+	passwordHash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
 	}
 
 	u := &store.User{
@@ -99,54 +84,13 @@ func (h *UserHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If no password provided, generate an invite token
-	resp := map[string]any{
+	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":       u.ID,
 		"name":     u.Name,
 		"email":    u.Email,
 		"role":     u.Role,
 		"timezone": u.Timezone,
-	}
-	if passwordHash == "" {
-		rawToken, inviteURL, err := h.generateInvite(r, u.ID)
-		if err != nil {
-			// User was created but invite failed — still return user with error hint
-			resp["invite_error"] = "failed to generate invite link"
-			writeJSON(w, http.StatusCreated, resp)
-			return
-		}
-		_ = rawToken
-		resp["invite_url"] = inviteURL
-	}
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-func (h *UserHandler) generateInvite(r *http.Request, userID string) (string, string, error) {
-	// Generate 32 random bytes → hex-encoded token
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", "", err
-	}
-	rawToken := hex.EncodeToString(raw)
-	hash := sha256.Sum256([]byte(rawToken))
-	tokenHash := hex.EncodeToString(hash[:])
-
-	invite := &store.InviteToken{
-		UserID:    userID,
-		TokenHash: tokenHash,
-		ExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour), // 7 days
-	}
-	if err := h.users.CreateInviteToken(r.Context(), invite); err != nil {
-		return "", "", err
-	}
-
-	// Build invite URL from request host
-	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
-	}
-	inviteURL := fmt.Sprintf("%s://%s/invite/%s", scheme, r.Host, rawToken)
-	return rawToken, inviteURL, nil
+	})
 }
 
 func (h *UserHandler) get(w http.ResponseWriter, r *http.Request) {
@@ -174,10 +118,6 @@ func (h *UserHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.ID = chi.URLParam(r, "id")
-	if u.Email != "" && !validateEmail(u.Email) {
-		writeError(w, http.StatusBadRequest, "invalid email address")
-		return
-	}
 	if u.Timezone != "" && !validateTimezone(u.Timezone) {
 		writeError(w, http.StatusBadRequest, "invalid timezone")
 		return
